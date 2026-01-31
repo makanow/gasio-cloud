@@ -4,142 +4,196 @@ import plotly.express as px
 import numpy as np
 
 # ---------------------------------------------------------
-# 1. デザイン & 設定 (Gasio Mini Style)
+# 1. 設定 & デザイン
 # ---------------------------------------------------------
-st.set_page_config(
-    page_title="Gasio mini", 
-    page_icon="🔥",
-    layout="centered" # スマホで見やすいよう、あえて中央寄せ
-)
+st.set_page_config(page_title="Gasio mini", page_icon="🔥", layout="wide")
 
-# カスタムCSS (Miniは少しポップに)
 st.markdown("""
     <style>
     .block-container { padding-top: 2rem; }
-    .main-title {
-        font-size: 2.5rem; font-weight: 800; color: #2c3e50;
-        margin-bottom: 0px; letter-spacing: -1px; text-align: center;
-    }
-    .sub-title {
-        font-size: 1.0rem; color: #95a5a6; margin-bottom: 30px;
-        text-align: center; border-bottom: 2px solid #e74c3c; padding-bottom: 10px;
-    }
-    div.stButton > button { width: 100%; border-radius: 20px; font-weight: bold; }
+    .main-title { font-size: 2.5rem; font-weight: 800; color: #2c3e50; text-align: center; margin-bottom: 0; }
+    .sub-title { font-size: 1.0rem; color: #7f8c8d; text-align: center; border-bottom: 2px solid #3498db; padding-bottom: 10px; margin-bottom: 20px;}
+    .stMetric { background-color: #f8f9fa; border-radius: 5px; padding: 10px; border-left: 4px solid #3498db; }
     </style>
 """, unsafe_allow_html=True)
 
 st.markdown('<div class="main-title"><span style="color:#2c3e50">Gas</span><span style="color:#e74c3c">i</span><span style="color:#3498db">o</span> mini</div>', unsafe_allow_html=True)
-st.markdown('<div class="sub-title">Instant Usage Visualizer</div>', unsafe_allow_html=True)
+st.markdown('<div class="sub-title">Current Status Visualizer</div>', unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# 2. データ読込 & 正規化
+# 2. 関数定義 (Gasio Core Logic移植)
 # ---------------------------------------------------------
-def load_data(file):
-    try:
-        try: df = pd.read_csv(file, encoding='cp932')
-        except: df = pd.read_csv(file, encoding='utf-8')
-        
-        # カラム名の正規化 (使用量さえあればいい)
-        rename_map = {'使用量':'Usage', 'Usage':'Usage', 'vol':'Usage', 'Volume':'Usage'}
-        df = df.rename(columns=rename_map)
-        
-        # 使用量カラムを探す
-        target_col = None
-        for col in df.columns:
-            if 'Usage' in col or '使用量' in col:
-                target_col = col; break
-        
-        if target_col:
-            df = df.rename(columns={target_col: 'Usage'})
-            # 数値化 & 欠損処理
-            df['Usage'] = pd.to_numeric(df['Usage'], errors='coerce').fillna(0)
-            return df
-        else:
-            return None
-    except: return None
+def normalize_columns(df):
+    rename_map = {
+        '基本': '基本料金', '基礎料金': '基本料金', 'Base': '基本料金',
+        '単位': '単位料金', '単価': '単位料金', '従量料金': '単位料金',
+        '上限': 'MAX', '適用上限': 'MAX',
+        '下限': 'MIN', '適用下限': 'MIN',
+        'ID': '料金表番号', 'Code': '料金表番号',
+        '調定': '調定数', 'BillingCount': '調定数', 'Billable': '調定数',
+        '取付': '取付数', 'MeterCount': '取付数'
+    }
+    df = df.rename(columns=rename_map)
+    # 必須カラム補完
+    if '料金表番号' not in df.columns: df['料金表番号'] = 10
+    if '調定数' not in df.columns: df['調定数'] = 1
+    return df
 
-# ---------------------------------------------------------
-# 3. メイン処理
-# ---------------------------------------------------------
-file = st.file_uploader("📂 使用量データ (CSV) をドロップ", type=['csv'])
+def smart_load(file):
+    # レートメイク形式等は簡易対応（CSV読み込みトライ）
+    file.seek(0)
+    for enc in ['cp932', 'utf-8', 'shift_jis']:
+        try:
+            file.seek(0)
+            df = pd.read_csv(file, encoding=enc)
+            df.columns = df.columns.astype(str).str.strip()
+            return normalize_columns(df)
+        except: continue
+    return None
 
-if file:
-    df = load_data(file)
-    if df is not None:
-        # KPI表示
-        total_count = len(df)
-        total_vol = df['Usage'].sum()
-        avg_vol = df['Usage'].mean()
-        max_vol = df['Usage'].max()
-        
-        k1, k2, k3 = st.columns(3)
-        k1.metric("データ件数", f"{total_count:,}", "Records")
-        k2.metric("総使用量", f"{total_vol:,.0f} m³", "Total")
-        k3.metric("平均使用量", f"{avg_vol:.1f} m³", "Avg")
-        
-        st.markdown("---")
-        
-        # --- 動的スライサー (Dynamic Tiering) ---
-        st.subheader("🎚️ 境界線シミュレーター")
-        st.caption("スライダーを動かして、区画（A/B/C）のシミュレーションができます")
-        
-        # スライダーで境界値を設定 (最大値に合わせてレンジを調整)
-        slider_max = int(min(max_vol, 500)) # あまり大きすぎると操作しづらいので500m3キャップ
-        
-        col_s1, col_s2 = st.columns(2)
-        with col_s1:
-            th_a = st.slider("A区画の上限 (m³)", 0, slider_max, 20, key="th_a")
-        with col_s2:
-            th_b = st.slider("B区画の上限 (m³)", th_a, slider_max, max(th_a, 50), key="th_b")
-            
-        # 区画判定ロジック
-        def get_tier(x):
-            if x <= th_a: return f"A (0-{th_a})"
-            elif x <= th_b: return f"B ({th_a}-{th_b})"
-            else: return f"C ({th_b}-∞)"
-            
-        df['Tier'] = df['Usage'].apply(get_tier)
-        
-        # 集計
-        agg = df.groupby('Tier').agg(
-            Count=('Usage', 'count'),
-            Volume=('Usage', 'sum')
-        ).reset_index()
-        
-        # 可視化エリア
-        t1, t2 = st.tabs(["📊 構成比 (Pie)", "📈 分布 (Hist)"])
-        
-        with t1:
-            c1, c2 = st.columns(2)
-            # Gasio Color Palette
-            colors = ['#88a0b9', '#f5b7b1', '#aab7b8']
-            
-            fig_count = px.pie(agg, values='Count', names='Tier', title="件数シェア", hole=0.6, color_discrete_sequence=colors)
-            fig_count.update_traces(textinfo='percent+label')
-            c1.plotly_chart(fig_count, use_container_width=True)
-            
-            fig_vol = px.pie(agg, values='Volume', names='Tier', title="使用量シェア", hole=0.6, color_discrete_sequence=colors)
-            fig_vol.update_traces(textinfo='percent+label')
-            c2.plotly_chart(fig_vol, use_container_width=True)
-            
-            st.dataframe(agg.style.format({'Volume': '{:,.1f}'}), use_container_width=True)
-
-        with t2:
-            # ヒストグラム
-            fig_hist = px.histogram(df, x="Usage", nbins=100, title="使用量度数分布", color_discrete_sequence=['#3498db'])
-            # 境界線を縦線で表示
-            fig_hist.add_vline(x=th_a, line_dash="dash", line_color="#e74c3c", annotation_text=f"A上限: {th_a}")
-            fig_hist.add_vline(x=th_b, line_dash="dash", line_color="#e74c3c", annotation_text=f"B上限: {th_b}")
-            fig_hist.update_layout(bargap=0.1)
-            st.plotly_chart(fig_hist, use_container_width=True)
-
+def get_tier_name(usage, tariff_df):
+    if tariff_df.empty: return "Unknown"
+    # MAXでソート
+    sorted_df = tariff_df.sort_values('MAX').reset_index(drop=True)
+    # 該当行を探す
+    applicable = sorted_df[sorted_df['MAX'] >= usage]
+    if applicable.empty:
+        row = sorted_df.iloc[-1] # 上限超えは最後の行
     else:
-        st.error("CSVに使用量データ（'使用量', 'Usage' 等）が見つかりませんでした。")
+        row = applicable.iloc[0]
+    
+    # 区画名を取得
+    if '区画名' in row and pd.notna(row['区画名']): return str(row['区画名'])
+    if '区画' in row and pd.notna(row['区画']): return str(row['区画'])
+    
+    # なければ自動命名
+    rank = row.name + 1
+    letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    label = letters[rank-1] if rank <= len(letters) else f"Tier{rank}"
+    return label
+
+# ---------------------------------------------------------
+# 3. サイドバー (ファイルアップロード)
+# ---------------------------------------------------------
+with st.sidebar:
+    st.header("📂 Data Import")
+    file_usage = st.file_uploader("1. 使用量CSV (実績)", type=['csv'])
+    file_master = st.file_uploader("2. 料金マスタCSV (定義)", type=['csv'])
+    
+    st.info("💡 Gasio計算機と同じCSVが使えます。")
+
+# ---------------------------------------------------------
+# 4. メイン処理
+# ---------------------------------------------------------
+if file_usage and file_master:
+    # データ読み込み
+    df_usage = smart_load(file_usage)
+    df_master = smart_load(file_master)
+    
+    if df_usage is None or df_master is None:
+        st.error("データの読み込みに失敗しました。フォーマットを確認してください。")
+        st.stop()
+        
+    # マスタにある料金表番号リスト
+    master_ids = sorted(df_master['料金表番号'].unique())
+    usage_ids = sorted(df_usage['料金表番号'].unique())
+    
+    # 共通するIDのみ抽出
+    valid_ids = [i for i in master_ids if i in usage_ids]
+    
+    if not valid_ids:
+        st.warning("マスタと使用量データで一致する「料金表番号」がありません。")
+        st.stop()
+        
+    # --- セレクター ---
+    st.write(f"✅ 分析対象データ: {len(df_usage):,} 件 (ID数: {len(valid_ids)})")
+    
+    col_sel, _ = st.columns([1, 2])
+    target_id = col_sel.selectbox("分析する料金表番号を選択", valid_ids)
+    
+    # --- フィルタリング & 分析 ---
+    # 1. 対象データの抽出
+    df_target = df_usage[df_usage['料金表番号'] == target_id].copy()
+    master_target = df_master[df_master['料金表番号'] == target_id].copy()
+    
+    if df_target.empty or master_target.empty:
+        st.warning("データが存在しません。")
+        st.stop()
+
+    # 2. マスタ情報の表示 (Expander)
+    with st.expander("マスタ定義 (区画情報) を確認"):
+        cols = [c for c in ['区画','区画名','MIN','MAX','基本料金','単位料金'] if c in master_target.columns]
+        st.dataframe(master_target[cols], hide_index=True)
+
+    # 3. 区画判定 (Gasio Logic)
+    # ここで計算機と同じロジックで「どの区画か？」を判定する
+    df_target['Current_Tier'] = df_target['使用量'].apply(lambda x: get_tier_name(x, master_target))
+    
+    # 4. 集計 (Aggregation)
+    # 調定数ベースでの集計（調定数0の行は構成比には含めない等の処理が必要ならここでフィルタ）
+    # Gasio計算機同様、sumをとる
+    agg_df = df_target.groupby('Current_Tier').agg(
+        調定数=('調定数', 'sum'),
+        総使用量=('使用量', 'sum')
+    ).reset_index()
+    
+    # マスタの区画順に並べ替えたい（アルファベット順などで簡易ソート）
+    agg_df = agg_df.sort_values('Current_Tier')
+
+    # 5. 可視化 (Visualization)
+    st.markdown("---")
+    st.markdown(f"### 📊 料金表: {target_id} の構成分析")
+    
+    # KPI
+    total_count = agg_df['調定数'].sum()
+    total_vol = agg_df['総使用量'].sum()
+    c1, c2, c3 = st.columns(3)
+    c1.metric("合計調定数", f"{total_count:,}")
+    c2.metric("合計使用量", f"{total_vol:,.0f} m³")
+    if total_count > 0:
+        c3.metric("1件あたり平均", f"{total_vol/total_count:.1f} m³")
+
+    # 円グラフ
+    g1, g2 = st.columns(2)
+    
+    # パレット
+    chic_colors = ['#88a0b9', '#aab7b8', '#82e0aa', '#f5b7b1', '#d7bde2', '#f9e79f']
+    
+    with g1:
+        st.markdown("**調定数シェア (Count %)**")
+        fig_count = px.pie(agg_df, values='調定数', names='Current_Tier', 
+                          hole=0.5, color_discrete_sequence=chic_colors)
+        fig_count.update_traces(textinfo='percent+label', textposition='inside')
+        st.plotly_chart(fig_count, use_container_width=True)
+        
+    with g2:
+        st.markdown("**使用量シェア (Volume %)**")
+        fig_vol = px.pie(agg_df, values='総使用量', names='Current_Tier', 
+                        hole=0.5, color_discrete_sequence=chic_colors)
+        fig_vol.update_traces(textinfo='percent+label', textposition='inside')
+        st.plotly_chart(fig_vol, use_container_width=True)
+
+    # 集計表
+    st.markdown("**詳細データ**")
+    # シェア(%)を計算して表示
+    agg_df['調定数構成比'] = (agg_df['調定数'] / total_count * 100).map('{:.1f}%'.format)
+    agg_df['使用量構成比'] = (agg_df['総使用量'] / total_vol * 100).map('{:.1f}%'.format)
+    
+    st.dataframe(
+        agg_df[['Current_Tier', '調定数', '調定数構成比', '総使用量', '使用量構成比']].style.format({
+            '調定数': '{:,}', 
+            '総使用量': '{:,.1f}'
+        }),
+        use_container_width=True,
+        hide_index=True
+    )
+    
+    # ヒストグラム (おまけ)
+    with st.expander("分布ヒストグラムを見る"):
+        fig_hist = px.histogram(df_target, x="使用量", nbins=100, color="Current_Tier",
+                               title="使用量分布（区画別色分け）",
+                               color_discrete_sequence=chic_colors)
+        st.plotly_chart(fig_hist, use_container_width=True)
+
 else:
-    st.info("👆 上のボックスにCSVをドラッグ＆ドロップしてください。")
-    st.markdown("""
-    ##### How to use
-    1. 顧客の**使用量データ**が入ったCSVをアップロードします。
-    2. 自動的に集計され、全体のボリューム感がわかります。
-    3. **スライダー**を動かすと、「もしここで区画を区切ったら、A区画は何％になるか？」が瞬時にわかります。
-    """)
+    st.info("👈 サイドバーから「使用量CSV」と「料金マスタCSV」をアップロードしてください。")
