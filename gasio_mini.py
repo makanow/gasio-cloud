@@ -4,25 +4,26 @@ import plotly.express as px
 import numpy as np
 
 # ---------------------------------------------------------
-# 1. 設定 & デザイン (修正済み: 左寄せ)
+# 1. 設定 & デザイン (修正: ロゴサイズ拡大 & 左寄せ)
 # ---------------------------------------------------------
 st.set_page_config(page_title="Gasio mini", page_icon="🔥", layout="wide")
 
 st.markdown("""
     <style>
     .block-container { padding-top: 2rem; }
-    /* ヘッダーの配置を center から left に変更 */
-    .main-title { font-size: 2.5rem; font-weight: 800; color: #2c3e50; text-align: left; margin-bottom: 0; }
-    .sub-title { font-size: 1.0rem; color: #7f8c8d; text-align: left; border-bottom: 2px solid #3498db; padding-bottom: 10px; margin-bottom: 20px;}
+    /* ヘッダーのフォントサイズを 2.5rem -> 3rem に拡大 */
+    .main-title { font-size: 3rem; font-weight: 800; color: #2c3e50; text-align: left; margin-bottom: 0; letter-spacing: -1px; }
+    .sub-title { font-size: 1.2rem; color: #7f8c8d; text-align: left; border-bottom: 2px solid #3498db; padding-bottom: 10px; margin-bottom: 20px;}
     .stMetric { background-color: #f8f9fa; border-radius: 5px; padding: 10px; border-left: 4px solid #3498db; }
     </style>
 """, unsafe_allow_html=True)
 
+# ロゴ表示
 st.markdown('<div class="main-title"><span style="color:#2c3e50">Gas</span><span style="color:#e74c3c">i</span><span style="color:#3498db">o</span> mini</div>', unsafe_allow_html=True)
 st.markdown('<div class="sub-title">Current Status Visualizer</div>', unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# 2. 関数定義 (強化版)
+# 2. 関数定義
 # ---------------------------------------------------------
 def normalize_columns(df):
     # 徹底的に揺らぎを吸収するマップ
@@ -33,7 +34,7 @@ def normalize_columns(df):
         '上限': 'MAX', '適用上限': 'MAX', 'max': 'MAX',
         '下限': 'MIN', '適用下限': 'MIN', 'min': 'MIN',
         'ID': '料金表番号', 'Code': '料金表番号', 'code': '料金表番号',
-        # 使用量系 (ここを強化)
+        # 使用量系
         'Usage': '使用量', 'usage': '使用量',
         'Vol': '使用量', 'vol': '使用量', 'Volume': '使用量', 'volume': '使用量',
         'Amount': '使用量', 'amount': '使用量',
@@ -96,7 +97,7 @@ if file_usage and file_master:
     df_usage = smart_load(file_usage)
     df_master = smart_load(file_master)
     
-    # エラーハンドリング強化
+    # エラーハンドリング
     if df_usage is None or df_master is None:
         st.error("データの読み込みに失敗しました。")
         st.stop()
