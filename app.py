@@ -374,4 +374,4 @@ if file_usage and file_master and selected_ids:
                 sg2.plotly_chart(px.pie(agg_n, values='総使用量', names='新プラン区画', title="使用量シェア", hole=0.5, color_discrete_sequence=CHIC_PIE_COLORS), use_container_width=True, key="pie_new_vol")
                 st.dataframe(agg_n.style.format({"調定数":"{:,}", "総使用量":"{:,.1f}"}))
 else:
-    st.info("👈 左側のサイドバーからデータを読み込んでください (Demoデータ可)")
+    st.info("👈 左側のサイドバーからデータを読み込んでください ")
