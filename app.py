@@ -220,7 +220,7 @@ with st.sidebar:
     st.markdown("---")
     file_usage = st.file_uploader("1. 使用量CSV", type=['csv'], key="usage")
     st.markdown("---")
-    file_master = st.file_uploader("2. 料金マスタCSV", type=['csv'], key="master")
+    file_master = st.file_uploader("2. 料金表マスタCSV", type=['csv'], key="master")
 
     selected_ids = []
     if file_master:
