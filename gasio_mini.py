@@ -4,15 +4,16 @@ import plotly.express as px
 import numpy as np
 
 # ---------------------------------------------------------
-# 1. 設定 & デザイン
+# 1. 設定 & デザイン (修正済み: 左寄せ)
 # ---------------------------------------------------------
 st.set_page_config(page_title="Gasio mini", page_icon="🔥", layout="wide")
 
 st.markdown("""
     <style>
     .block-container { padding-top: 2rem; }
-    .main-title { font-size: 2.5rem; font-weight: 800; color: #2c3e50; text-align: center; margin-bottom: 0; }
-    .sub-title { font-size: 1.0rem; color: #7f8c8d; text-align: center; border-bottom: 2px solid #3498db; padding-bottom: 10px; margin-bottom: 20px;}
+    /* ヘッダーの配置を center から left に変更 */
+    .main-title { font-size: 2.5rem; font-weight: 800; color: #2c3e50; text-align: left; margin-bottom: 0; }
+    .sub-title { font-size: 1.0rem; color: #7f8c8d; text-align: left; border-bottom: 2px solid #3498db; padding-bottom: 10px; margin-bottom: 20px;}
     .stMetric { background-color: #f8f9fa; border-radius: 5px; padding: 10px; border-left: 4px solid #3498db; }
     </style>
 """, unsafe_allow_html=True)
