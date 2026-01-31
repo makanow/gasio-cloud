@@ -5,7 +5,6 @@ import numpy as np
 # ---------------------------------------------------------
 # 1. 設定 & デザイン (Gasio Calculator Style)
 # ---------------------------------------------------------
-# 【修正】layout="wide" に変更して横幅を最大化
 st.set_page_config(page_title="Gasio 電卓", page_icon="🧮", layout="wide")
 
 st.markdown("""
@@ -106,8 +105,8 @@ tab1, tab2 = st.tabs(["🔄 順算 (従量 → 基本)", "🧮 逆算 (基本 �
 with tab1:
     st.caption("従量単価を決めて、基本料金を自動計算します")
     
-    # 【修正】カラム比率を変更し、テーブルエリアを拡張
-    c1, c2 = st.columns([4, 6])
+    # 【修正】左右均等 [1, 1] に変更
+    c1, c2 = st.columns([1, 1])
     
     with c1:
         st.markdown("##### 1. パラメータ入力")
@@ -130,7 +129,6 @@ with tab1:
         if not edited_fwd.empty:
             calc_df = edited_fwd.rename(columns={'単位料金(入力)': '単位料金'})
             
-            # 型変換の安全策
             calc_df['単位料金'] = pd.to_numeric(calc_df['単位料金'], errors='coerce').fillna(0)
             calc_df['適用上限(m3)'] = pd.to_numeric(calc_df['適用上限(m3)'], errors='coerce').fillna(0)
             
@@ -140,14 +138,13 @@ with tab1:
             for idx, row in calc_df.sort_values('No').iterrows():
                 no = row['No']
                 res_list.append({
-                    "No": no, # Noも表示
+                    "No": no,
                     "区画": row['区画名'],
                     "適用上限": row['適用上限(m3)'],
                     "基本料金 (算出)": res_bases.get(no, 0),
                     "単位料金": row['単位料金']
                 })
             
-            # 結果テーブルを大きく表示
             st.dataframe(
                 pd.DataFrame(res_list).set_index('No').style.format({
                     "適用上限": "{:,.1f}",
@@ -155,7 +152,7 @@ with tab1:
                     "単位料金": "{:,.2f}"
                 }),
                 use_container_width=True,
-                height=400 # 高さを指定して見やすく
+                height=400
             )
 
 
@@ -163,11 +160,11 @@ with tab1:
 with tab2:
     st.caption("基本料金を先に決めて、整合する従量単価を逆算します")
     
-    c1, c2 = st.columns([4, 6])
+    # 【修正】左右均等 [1, 1] に変更
+    c1, c2 = st.columns([1, 1])
     
     with c1:
         st.markdown("##### 1. パラメータ入力")
-        # 逆算には「A区画の基本料金」と「A区画の単位料金」の両方が起点として必要
         col_start1, col_start2 = st.columns(2)
         base_a_rev = col_start1.number_input("A区画 基本料金", value=1000.0, step=10.0, key="rev_base_a")
         unit_a_rev = col_start2.number_input("A区画 単位料金", value=150.00, step=1.0, key="rev_unit_a")
