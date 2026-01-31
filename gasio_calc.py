@@ -5,13 +5,14 @@ import numpy as np
 # ---------------------------------------------------------
 # 1. 設定 & デザイン (Gasio Calculator Style)
 # ---------------------------------------------------------
-st.set_page_config(page_title="Gasio 電卓", page_icon="🧮", layout="centered")
+# 【修正】layout="wide" に変更して横幅を最大化
+st.set_page_config(page_title="Gasio 電卓", page_icon="🧮", layout="wide")
 
 st.markdown("""
     <style>
     .block-container { padding-top: 2rem; }
-    .main-title { font-size: 2.5rem; font-weight: 800; color: #2c3e50; text-align: center; margin-bottom: 0; }
-    .sub-title { font-size: 1.0rem; color: #7f8c8d; text-align: center; border-bottom: 2px solid #e74c3c; padding-bottom: 10px; margin-bottom: 20px;}
+    .main-title { font-size: 3rem; font-weight: 800; color: #2c3e50; margin-bottom: 0; }
+    .sub-title { font-size: 1.2rem; color: #7f8c8d; border-bottom: 2px solid #e74c3c; padding-bottom: 10px; margin-bottom: 20px;}
     .stNumberInput input { font-weight: bold; color: #2c3e50; }
     div[data-testid="stMetricValue"] { font-size: 1.2rem; }
     </style>
@@ -21,62 +22,67 @@ st.markdown('<div class="main-title"><span style="color:#2c3e50">Gas</span><span
 st.markdown('<div class="sub-title">Rate Design Solver</div>', unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# 2. 計算ロジック
+# 2. 計算ロジック (堅牢化版)
 # ---------------------------------------------------------
 
 def solve_base(df_input, base_a):
-    """
-    順算: 従量料金(Unit)から基本料金(Base)を算出
-    Base[n] = Base[n-1] + (Unit[n-1] - Unit[n]) * Limit[n-1]
-    """
-    df = df_input.copy().sort_values('No')
-    bases = {1: base_a}
+    """ 順算: 従量料金(Unit)から基本料金(Base)を算出 """
+    df = df_input.copy().sort_values('No').reset_index(drop=True)
+    if df.empty: return {}
+
+    first_no = df.iloc[0]['No']
+    bases = {first_no: base_a}
     
-    # 計算
-    for i in range(2, len(df) + 2):
-        prev = df[df['No'] == i-1].iloc[0]
-        curr = df[df['No'] == i].iloc[0]
+    for i in range(1, len(df)):
+        prev_row = df.iloc[i-1]
+        curr_row = df.iloc[i]
         
-        limit_prev = prev['適用上限(m3)']
-        unit_prev = prev['単位料金']
-        unit_curr = curr['単位料金']
+        curr_no = curr_row['No']
+        prev_no = prev_row['No']
         
-        # スライド計算式
-        bases[i] = bases[i-1] + (unit_prev - unit_curr) * limit_prev
+        limit_prev = prev_row['適用上限(m3)']
+        unit_prev = prev_row['単位料金']
+        unit_curr = curr_row['単位料金']
+        
+        base_prev = bases.get(prev_no, 0)
+        base_curr = base_prev + (unit_prev - unit_curr) * limit_prev
+        bases[curr_no] = base_curr
         
     return bases
 
 def solve_unit(df_input, base_a, unit_a):
-    """
-    逆算: 基本料金(Base)から従量料金(Unit)を算出
-    変形: Unit[n] = Unit[n-1] - (Base[n] - Base[n-1]) / Limit[n-1]
-    """
-    df = df_input.copy().sort_values('No')
-    units = {1: unit_a}
-    
-    # 入力された基本料金を辞書化
-    bases = {1: base_a}
-    for idx, row in df.iterrows():
-        if row['No'] > 1:
-            bases[row['No']] = row['基本料金(入力)']
+    """ 逆算: 基本料金(Base)から従量料金(Unit)を算出 """
+    df = df_input.copy().sort_values('No').reset_index(drop=True)
+    if df.empty: return {}
 
-    # 計算
-    for i in range(2, len(df) + 2):
-        prev_row = df[df['No'] == i-1].iloc[0]
-        # curr_row = df[df['No'] == i].iloc[0] # currの基本料金はbasesにある
+    first_no = df.iloc[0]['No']
+    units = {first_no: unit_a}
+    
+    input_bases = {}
+    input_bases[first_no] = base_a
+    for idx, row in df.iterrows():
+        if idx > 0:
+            input_bases[row['No']] = row['基本料金(入力)']
+
+    for i in range(1, len(df)):
+        prev_row = df.iloc[i-1]
+        curr_row = df.iloc[i]
+        
+        curr_no = curr_row['No']
+        prev_no = prev_row['No']
         
         limit_prev = prev_row['適用上限(m3)']
-        base_prev = bases[i-1]
-        base_curr = bases[i]
-        unit_prev = units[i-1]
         
-        # 逆算式
-        # Base_diff = (Unit_prev - Unit_curr) * Limit
-        # Unit_curr = Unit_prev - (Base_diff / Limit)
+        base_prev = input_bases.get(prev_no, 0)
+        base_curr = input_bases.get(curr_no, 0)
+        unit_prev = units.get(prev_no, 0)
+        
         if limit_prev > 0:
-            units[i] = unit_prev - (base_curr - base_prev) / limit_prev
+            unit_curr = unit_prev - (base_curr - base_prev) / limit_prev
         else:
-            units[i] = 0 # ゼロ除算回避
+            unit_curr = 0
+            
+        units[curr_no] = unit_curr
             
     return units
 
@@ -94,15 +100,17 @@ if 'calc_data' not in st.session_state:
         '単位料金(入力)': [150.0, 140.0, 130.0]     # 順算用
     })
 
-tab1, tab2 = st.tabs(["🔄 順算 (Base求)", "🧮 逆算 (Unit求)"])
+tab1, tab2 = st.tabs(["🔄 順算 (従量 → 基本)", "🧮 逆算 (基本 → 従量)"])
 
 # === Tab 1: 順算モード ===
 with tab1:
-    st.subheader("単位料金 → 基本料金")
     st.caption("従量単価を決めて、基本料金を自動計算します")
     
-    c1, c2 = st.columns([1, 1])
+    # 【修正】カラム比率を変更し、テーブルエリアを拡張
+    c1, c2 = st.columns([4, 6])
+    
     with c1:
+        st.markdown("##### 1. パラメータ入力")
         base_a_fwd = st.number_input("A区画 基本料金", value=1000.0, step=10.0, key="fwd_base_a")
         
         edited_fwd = st.data_editor(
@@ -118,34 +126,47 @@ with tab1:
         )
         
     with c2:
-        st.markdown("###### 📝 計算結果")
+        st.markdown("##### 2. 計算結果")
         if not edited_fwd.empty:
-            # カラム名を統一して計算関数へ
             calc_df = edited_fwd.rename(columns={'単位料金(入力)': '単位料金'})
+            
+            # 型変換の安全策
+            calc_df['単位料金'] = pd.to_numeric(calc_df['単位料金'], errors='coerce').fillna(0)
+            calc_df['適用上限(m3)'] = pd.to_numeric(calc_df['適用上限(m3)'], errors='coerce').fillna(0)
+            
             res_bases = solve_base(calc_df, base_a_fwd)
             
             res_list = []
-            for idx, row in calc_df.iterrows():
+            for idx, row in calc_df.sort_values('No').iterrows():
                 no = row['No']
                 res_list.append({
+                    "No": no, # Noも表示
                     "区画": row['区画名'],
+                    "適用上限": row['適用上限(m3)'],
                     "基本料金 (算出)": res_bases.get(no, 0),
                     "単位料金": row['単位料金']
                 })
             
-            st.dataframe(pd.DataFrame(res_list).style.format({
-                "基本料金 (算出)": "{:,.2f}", 
-                "単位料金": "{:,.2f}"
-            }), use_container_width=True)
+            # 結果テーブルを大きく表示
+            st.dataframe(
+                pd.DataFrame(res_list).set_index('No').style.format({
+                    "適用上限": "{:,.1f}",
+                    "基本料金 (算出)": "{:,.2f}", 
+                    "単位料金": "{:,.2f}"
+                }),
+                use_container_width=True,
+                height=400 # 高さを指定して見やすく
+            )
 
 
 # === Tab 2: 逆算モード ===
 with tab2:
-    st.subheader("基本料金 → 単位料金")
     st.caption("基本料金を先に決めて、整合する従量単価を逆算します")
     
-    c1, c2 = st.columns([1, 1])
+    c1, c2 = st.columns([4, 6])
+    
     with c1:
+        st.markdown("##### 1. パラメータ入力")
         # 逆算には「A区画の基本料金」と「A区画の単位料金」の両方が起点として必要
         col_start1, col_start2 = st.columns(2)
         base_a_rev = col_start1.number_input("A区画 基本料金", value=1000.0, step=10.0, key="rev_base_a")
@@ -164,26 +185,38 @@ with tab2:
         )
 
     with c2:
-        st.markdown("###### 📝 計算結果")
+        st.markdown("##### 2. 計算結果")
         if not edited_rev.empty:
-            res_units = solve_unit(edited_rev, base_a_rev, unit_a_rev)
+            calc_df_rev = edited_rev.copy()
+            calc_df_rev['基本料金(入力)'] = pd.to_numeric(calc_df_rev['基本料金(入力)'], errors='coerce').fillna(0)
+            calc_df_rev['適用上限(m3)'] = pd.to_numeric(calc_df_rev['適用上限(m3)'], errors='coerce').fillna(0)
+
+            res_units = solve_unit(calc_df_rev, base_a_rev, unit_a_rev)
             
             res_list = []
-            # 入力データにはA区画の基本料金が含まれていない場合があるので統合
-            # (DataEditorはNo1から持っている前提)
-            for idx, row in edited_rev.iterrows():
+            for idx, row in calc_df_rev.sort_values('No').iterrows():
                 no = row['No']
-                base_val = base_a_rev if no == 1 else row['基本料金(入力)']
+                if no == 1:
+                    base_val = base_a_rev 
+                else:
+                    base_val = row['基本料金(入力)']
                 
                 res_list.append({
+                    "No": no,
                     "区画": row['区画名'],
+                    "適用上限": row['適用上限(m3)'],
                     "基本料金": base_val,
                     "単位料金 (算出)": res_units.get(no, 0)
                 })
             
-            st.dataframe(pd.DataFrame(res_list).style.format({
-                "基本料金": "{:,.2f}", 
-                "単位料金 (算出)": "{:,.4f}"
-            }), use_container_width=True)
+            st.dataframe(
+                pd.DataFrame(res_list).set_index('No').style.format({
+                    "適用上限": "{:,.1f}",
+                    "基本料金": "{:,.2f}", 
+                    "単位料金 (算出)": "{:,.4f}"
+                }), 
+                use_container_width=True,
+                height=400
+            )
             
             st.info("💡 「単位料金」がマイナスになる場合は、基本料金の傾斜がきつすぎます。")
