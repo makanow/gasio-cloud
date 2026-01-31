@@ -84,7 +84,7 @@ def get_tier_name(usage, tariff_df):
 with st.sidebar:
     st.header("📂 Data Import")
     file_usage = st.file_uploader("1. 使用量CSV (実績)", type=['csv'])
-    file_master = st.file_uploader("2. 料金マスタCSV (定義)", type=['csv'])
+    file_master = st.file_uploader("2. 料金表マスタCSV (定義)", type=['csv'])
     st.info("💡 CSVヘッダーに「使用量」または「Usage」を含めてください。")
 
 # ---------------------------------------------------------
@@ -179,4 +179,4 @@ if file_usage and file_master:
     st.dataframe(agg_df[['Current_Tier', '調定数', '調定数構成比', '総使用量', '使用量構成比']], hide_index=True, use_container_width=True)
 
 else:
-    st.info("👈 サイドバーから「使用量CSV」と「料金マスタCSV」をアップロードしてください。")
+    st.info("👈 サイドバーから「使用量CSV」と「料金表マスタCSV」をアップロードしてください。")
