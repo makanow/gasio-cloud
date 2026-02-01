@@ -1,14 +1,23 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime
 
 # ---------------------------------------------------------
 # 1. ページ構成
 # ---------------------------------------------------------
-st.set_page_config(page_title="G-Calc Cloud: 償却資産エディタ", layout="wide")
-st.title("🛡️ G-Calc Cloud: 分散投資・償却資産管理")
+st.set_page_config(page_title="G-Calc Cloud: 償却資産要塞", layout="wide")
+st.title("🛡️ G-Calc Cloud: 償却資産・分散投資シミュレーター")
 
 EXCEL_FILE = "G-Calc_master.xlsx"
+
+# アセット区分と標準係数A内の列インデックス、償却率の定義
+# (標準係数Aシートの構成に基づく)
+ASSET_MAP = {
+    "建物": {"idx": 3, "code": "TTM", "rate": 0.03},
+    "構築物": {"idx": 4, "code": "KCB", "rate": 0.1},
+    "メーター": {"idx": 11, "code": "MTR", "rate": 0.077},
+    "備品": {"idx": 12, "code": "BHN", "rate": 0.2},
+    "強制気化装置": {"idx": 16, "code": "KKS", "rate": 0.1}
+}
 
 # ---------------------------------------------------------
 # 2. マスタデータの読み込み（標準係数Aから単価表を作成）
@@ -16,18 +25,29 @@ EXCEL_FILE = "G-Calc_master.xlsx"
 @st.cache_data
 def load_infra_master():
     try:
-        # 「標準係数A」から期間IDごとの単価を引っこ抜く
-        df_a = pd.read_excel(EXCEL_FILE, sheet_name='標準係数A', skiprows=2)
-        # 必要な列を特定（ID, 適用開始, 建物(TTM), 構築物(KCB), メーター(MTR)等）
-        master = df_a.iloc[:, [0, 1, 4, 5, 12]].dropna(subset=[df_a.columns[0]])
-        master.columns = ['ID', '開始日', '建物', '構築物', 'メーター']
-        # 画面表示用に「ID (開始日〜)」というリストを作る
-        master['label'] = master['ID'] + " (" + master['開始日'].astype(str) + "〜)"
-        return master.set_index('ID'), master['label'].tolist()
+        # 見出しを考慮して2行目から読み込み
+        df_a = pd.read_excel(EXCEL_FILE, sheet_name='標準係数A', skiprows=1)
+        
+        # 期間IDが含まれる行（HKから始まる行）のみ抽出
+        master = df_a[df_a.iloc[:, 1].astype(str).str.contains("HK", na=False)].copy()
+        
+        # 列の特定 (ID, 開始日, 建物, 構築物, メーター)
+        # iloc[行, [1:ID, 2:開始日, 4:建物, 5:構築物, 12:メーター]] ※skiprows後の相対座標
+        result_df = master.iloc[:, [1, 2, 4, 5, 12]].copy()
+        result_df.columns = ['ID', '開始日', '建物', '構築物', 'メーター']
+        
+        # エラー対策：すべて文字列に変換してからラベル作成
+        ids = result_df['ID'].astype(str).tolist()
+        dates = result_df['開始日'].astype(str).tolist()
+        labels = [f"{i} ({d}〜)" for i, d in zip(ids, dates)]
+        
+        # 検索用の辞書（ID -> 単価データ）
+        return result_df.set_index('ID'), labels
     except Exception as e:
         st.error(f"マスタ読み込み失敗: {e}")
-        return pd.DataFrame(), ["HK13 (2007-01-01〜)"]
+        return pd.DataFrame(), ["HK13"]
 
+# マスタ準備
 infra_df, id_labels = load_infra_master()
 
 # ---------------------------------------------------------
@@ -38,82 +58,85 @@ total_customers = st.sidebar.number_input("許可地点数（合計）", value=2
 
 st.sidebar.divider()
 st.sidebar.subheader("🚐 車両設定")
-vehicle_mode = st.sidebar.selectbox("車両保有形態", ["自社所有（標準投資適用）", "リース（投資除外）"])
+vehicle_mode = st.sidebar.selectbox("車両保有形態", ["自社所有（投資適用）", "リース（投資除外）"])
 
 # ---------------------------------------------------------
-# 4. メイン画面：分散投資エディタ（償却資産シートの再現）
+# 4. メイン画面：償却資産エディタ（Excel「償却資産」シートを再現）
 # ---------------------------------------------------------
 st.header("🏗️ 償却資産・分散取得入力")
-st.write(f"「償却資産」シートのように、取得時期ごとに地点数を割り振ってください。")
+st.write(f"各資産の地点数を入力してください。合計が **{total_customers}** になると「✅」が表示されます。")
 
-# 初期データの作成（償却資産シートのNo.1〜3のイメージ）
-if 'invest_df' not in st.session_state:
-    st.session_state.invest_df = pd.DataFrame([
-        {"No": 1, "項目": "建物・メーター等", "期間ID": "HK13", "地点数": total_customers},
-        {"No": 2, "項目": "建物・メーター等", "期間ID": "HK12", "地点数": 0},
-        {"No": 3, "項目": "建物・メーター等", "期間ID": "HK08", "地点数": 0},
+# 初期行の設定
+if 'asset_rows' not in st.session_state:
+    st.session_state.asset_rows = pd.DataFrame([
+        {"項目": "建物", "期間ID": "HK08", "地点数": total_customers},
+        {"項目": "構築物", "期間ID": "HK08", "地点数": total_customers},
+        {"項目": "メーター", "期間ID": "HK13", "地点数": total_customers},
     ])
 
-# データエディタ（ここでドロップダウンと数値入力を統合！）
-edited_df = st.data_editor(
-    st.session_state.invest_df,
+# データエディタ（追加・削除・編集が自由自在）
+edited_assets = st.data_editor(
+    st.session_state.asset_rows,
     num_rows="dynamic",
     column_config={
-        "No": st.column_config.NumberColumn(width="small", disabled=True),
-        "項目": st.column_config.TextColumn(width="medium"),
-        "期間ID": st.column_config.SelectboxColumn(
-            "期間ID (取得時期)", 
-            options=infra_df.index.tolist(), # IDのみを選択肢にする
-            required=True,
-            width="large"
-        ),
-        "地点数": st.column_config.NumberColumn("地点数", min_value=0, step=1, format="%d", width="medium"),
+        "項目": st.column_config.SelectboxColumn("項目 (Asset)", options=list(ASSET_MAP.keys()), required=True),
+        "期間ID": st.column_config.SelectboxColumn("取得時期 (ID)", options=infra_df.index.tolist(), required=True),
+        "地点数": st.column_config.NumberColumn("地点数", min_value=0, step=1, format="%d"),
     },
     use_container_width=True,
-    key="invest_editor"
+    key="asset_editor"
 )
 
-# --- 整合性チェック（バリデーション） ---
-current_sum = edited_df["地点数"].sum()
-diff = total_customers - current_sum
-
-if diff == 0:
-    st.success(f"✅ 地点数合計：{current_sum} / {total_customers} (一致しています)")
-else:
-    st.error(f"❌ 地点数合計：{current_sum} / {total_customers} (残：{diff})")
-
 # ---------------------------------------------------------
-# 5. 計算エンジン：各行の単価をマスタから引いて合計
+# 5. 集計とバリデーション
 # ---------------------------------------------------------
 st.divider()
-st.subheader("📊 投資算定サマリー")
+st.subheader("📊 投資・償却費 算定サマリー")
 
-total_ttm = 0 # 建物
-total_mtr = 0 # メーター
+summary_results = []
+for cat, info in ASSET_MAP.items():
+    rows = edited_assets[edited_assets["項目"] == cat]
+    cat_sum = int(rows["地点数"].sum())
+    
+    # 投資額と償却費の計算
+    inv_total = 0
+    for _, r in rows.iterrows():
+        hid = str(r["期間ID"])
+        if hid in infra_df.index:
+            unit_price = infra_df.loc[hid, cat]
+            inv_total += r["地点数"] * unit_price
+    
+    dep_total = inv_total * info["rate"]
+    
+    summary_results.append({
+        "項目": cat,
+        "地点数合計": cat_sum,
+        "投資総額 (円)": inv_total,
+        "減価償却費 (円)": dep_total,
+        "状態": "✅ OK" if cat_sum == total_customers else f"❌ 不一致 ({cat_sum - total_customers})"
+    })
 
-for _, row in edited_df.iterrows():
-    hid = row["期間ID"]
-    num = row["地点数"]
-    if hid in infra_df.index:
-        total_ttm += num * infra_df.loc[hid, "建物"]
-        total_mtr += num * infra_df.loc[hid, "メーター"]
-
-# 車両計算（CA判定は地点数合計で決まるため独立計算）
-if "自社所有" in vehicle_mode:
-    # 245地点ならCA1(7270円)
-    v_unit = 7270 if total_customers <= 250 else 5450 # 簡易化
-    total_vehicle = total_customers * v_unit
-else:
-    total_vehicle = 0
-
-c1, c2, c3 = st.columns(3)
-c1.metric("建物 投資総額", f"{total_ttm:,.0f} 円")
-c2.metric("メーター 投資総額", f"{total_mtr:,.0f} 円")
-c3.metric("車両 投資総額", f"{total_vehicle:,.0f} 円")
+st.dataframe(pd.DataFrame(summary_results), use_container_width=True)
 
 # ---------------------------------------------------------
-# 6. ロジック公開モード：表形式で単価を表示
+# 6. ロジック公開モード：詳細明細
 # ---------------------------------------------------------
-if st.checkbox("📖 適用されている単価表（標準係数A）を確認"):
-    st.write("選択中の期間IDに対応する、1地点あたりの標準投資額です。")
-    st.dataframe(infra_df[['開始日', '建物', 'メーター']], use_container_width=True)
+if st.checkbox("📖 各行の計算明細を確認（審査・教育用）"):
+    details = []
+    for _, r in edited_assets.iterrows():
+        hid = str(r["期間ID"])
+        cat = r["項目"]
+        num = r["地点数"]
+        if hid in infra_df.index:
+            unit = infra_df.loc[hid, cat]
+            inv = unit * num
+            details.append({
+                "項目": cat, "期間": hid, "地点数": num, 
+                "標準単価": f"{unit:,.0f}", "投資額": f"{inv:,.0f}", 
+                "償却率": ASSET_MAP[cat]["rate"], "償却費": f"{inv * ASSET_MAP[cat]['rate']:,.0f}"
+            })
+    st.table(pd.DataFrame(details))
+
+# サイドバーに単価表をチラ見せ
+with st.sidebar.expander("参考：標準係数Aの単価表"):
+    st.dataframe(infra_df[['開始日', '建物', 'メーター']])
