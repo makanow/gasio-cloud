@@ -18,7 +18,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.markdown('<div class="main-title">Gasio mini</div>', unsafe_allow_html=True)
-st.markdown('<div class="sub-title">Robust Multi-Tariff Analyzer</div>', unsafe_allow_html=True)
+st.markdown('<div class="sub-title">Final Robust Version</div>', unsafe_allow_html=True)
 
 # ---------------------------------------------------------
 # 2. 関数定義
@@ -48,8 +48,9 @@ def smart_load(file):
 
 def get_standard_tier_label(usage, sorted_master):
     if sorted_master.empty: return "Unknown"
-    # 小数点精度の影響を排除
-    applicable = sorted_master[sorted_master['MAX'] >= round(usage, 6)]
+    # 数値として比較するためにfloat化と微小誤差の吸収
+    u = float(usage)
+    applicable = sorted_master[sorted_master['MAX'] >= (u - 0.000001)]
     row = applicable.iloc[0] if not applicable.empty else sorted_master.iloc[-1]
     min_val = row['MIN'] if 'MIN' in row else 0
     return f"{min_val:g} - {row['MAX']:g} m³"
@@ -83,42 +84,47 @@ if file_usage and file_master:
     # --- 構造チェック ---
     structures = {}
     for tid in selected_ids:
-        m_sub = df_master[df_master['料金表番号'] == tid]
+        m_sub = df_master[df_master['料金表番号'] == tid].copy()
         if m_sub.empty: continue
+        m_sub['MAX'] = m_sub['MAX'].astype(float)
         fingerprint = tuple(sorted(m_sub['MAX'].unique()))
         structures[tid] = fingerprint
 
     unique_patterns = set(structures.values())
     if len(unique_patterns) > 1:
-        st.error("⚠️ 選択された料金表間で「区画の境界」が一致しません。個別に分析してください。")
+        st.error("⚠️ 選択された料金表間で「区画の境界」が一致しません。")
         st.stop()
 
     # --- 判定と集計 ---
     df_target = df_usage[df_usage['料金表番号'].isin(selected_ids)].copy()
-    
     if df_target.empty:
-        st.warning("選択されたIDに対応する実績データが存在しません。")
+        st.warning("選択されたIDにデータがありません。")
         st.stop()
 
     master_rep = df_master[df_master['料金表番号'] == selected_ids[0]].sort_values('MAX').reset_index(drop=True)
+    master_rep['MAX'] = master_rep['MAX'].astype(float)
 
+    # 安全な区画判定
     df_target['Current_Tier'] = df_target['使用量'].apply(lambda x: get_standard_tier_label(x, master_rep))
 
-    # 集計実行
+    # 集計
     agg_df = df_target.groupby('Current_Tier').agg(
         調定数=('調定数', 'sum'),
         総使用量=('使用量', 'sum')
     ).reset_index()
 
-    # ソート順の付与
-    labels_in_order = [get_standard_tier_label(r['MAX'] - 0.000001, master_rep) for _, r in master_rep.iterrows()]
+    # ソート順序の強制適用
+    labels_in_order = []
+    for _, r in master_rep.iterrows():
+        labels_in_order.append(get_standard_tier_label(r['MAX'] - 0.000001, master_rep))
+    
     order_map = {label: i for i, label in enumerate(labels_in_order)}
     agg_df['order'] = agg_df['Current_Tier'].map(order_map)
     agg_df = agg_df.sort_values('order').drop(columns=['order'])
 
     # --- 表示 ---
-    total_count = agg_df['調定数'].sum()
-    total_vol = agg_df['総使用量'].sum()
+    total_count = agg_df['調定数'].sum() if not agg_df.empty else 0
+    total_vol = agg_df['総使用量'].sum() if not agg_df.empty else 0
     
     st.markdown("---")
     m1, m2, m3 = st.columns(3)
@@ -126,7 +132,7 @@ if file_usage and file_master:
     m2.metric("合計使用量", f"{total_vol:,.0f} m³")
     if total_count > 0: m3.metric("1件あたり平均", f"{total_vol/total_count:.1f} m³")
 
-    # 【重要】集計結果が空、もしくは全データが0の場合は描画しないガード
+    # 【重要】描画ガード：agg_dfが空でない、かつ値が存在する場合のみ実行
     if not agg_df.empty and total_count > 0:
         g1, g2 = st.columns(2)
         chic_colors = ['#88a0b9', '#82e0aa', '#f5b7b1', '#d7bde2', '#f9e79f', '#aab7b8']
@@ -138,20 +144,17 @@ if file_usage and file_master:
         
         with g2:
             st.write("**使用量シェア**")
-            # 使用量が全件0の場合はパイチャートを描画しない
             if total_vol > 0:
                 fig2 = px.pie(agg_df, values='総使用量', names='Current_Tier', hole=0.5, color_discrete_sequence=chic_colors, sort=False)
                 st.plotly_chart(fig2, use_container_width=True)
             else:
-                st.info("使用量がすべて 0 m³ のため、シェアグラフは表示されません。")
+                st.info("使用量が0のためグラフを表示できません。")
 
         agg_df['調定数構成比'] = (agg_df['調定数'] / total_count * 100).map('{:.1f}%'.format)
         agg_df['使用量構成比'] = (agg_df['総使用量'] / (total_vol if total_vol > 0 else 1) * 100).map('{:.1f}%'.format)
-        
-        st.markdown("**詳細データテーブル**")
         st.dataframe(agg_df[['Current_Tier', '調定数', '調定数構成比', '総使用量', '使用量構成比']], hide_index=True, use_container_width=True)
     else:
-        st.warning("集計データがありません。選択したIDに実績が含まれているか確認してください。")
+        st.warning("集計対象の有効なデータが見つかりませんでした。")
 
 else:
     st.info("👈 サイドバーからCSVをアップロードしてください。")
