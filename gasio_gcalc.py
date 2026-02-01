@@ -140,4 +140,24 @@ if not res_df.empty:
         res_df.drop(columns=["code"]),
         column_config={
             "投資額①": st.column_config.NumberColumn("投資額①(非減免)", format="¥%,d"),
-            "投資額②": st.column_config.NumberColumn("
+            "投資額②": st.column_config.NumberColumn("投資額②(減免)", format="¥%,d"),
+            "減価償却費": st.column_config.NumberColumn("減価償却費", format="¥%,.1f"),
+            "地点数": st.column_config.NumberColumn("地点数", format="%,d"),
+        },
+        use_container_width=True
+    )
+
+    # バリデーション
+    pipe_sum = res_df[res_df["code"].isin(["DKK", "DPK", "DKT", "DPT"])]["地点数"].sum()
+    c1, c2 = st.columns(2)
+    with c1:
+        if pipe_sum == total_customers:
+            st.success(f"✅ 導管合計：{pipe_sum:,} / {total_customers:,}")
+        else:
+            st.error(f"❌ 導管合計：{pipe_sum:,} (目標：{total_customers:,})")
+
+    st.divider()
+    m1, m2, m3 = st.columns(3)
+    m1.metric("投資額① (非減免)", f"¥ {res_df['投資額①'].sum():,.0f}")
+    m2.metric("投資額② (減免)", f"¥ {res_df['投資額②'].sum():,.0f}")
+    m3.metric("総 減価償却費", f"¥ {res_df['減価償却費'].sum():,.1f}")
