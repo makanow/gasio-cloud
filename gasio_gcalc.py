@@ -6,6 +6,7 @@ from decimal import Decimal, ROUND_HALF_UP
 # --- Excel互換・四捨五入エンジン ---
 def excel_round(value, decimals=0):
     try:
+        # NoneやNaNを0として扱う
         if value is None or pd.isna(value): return 0
         d = Decimal(str(float(value)))
         exp = Decimal('1') if decimals == 0 else Decimal('0.' + '0' * (decimals - 1) + '1')
@@ -13,7 +14,7 @@ def excel_round(value, decimals=0):
     except:
         return 0
 
-st.set_page_config(page_title="G-Calc Master: 回路復旧版", layout="wide")
+st.set_page_config(page_title="G-Calc Master: 鉄壁版", layout="wide")
 st.title("🛡️ G-Calc Master: 投資・償却資産 算定要塞")
 
 EXCEL_FILE = "G-Calc_master.xlsx"
@@ -74,53 +75,67 @@ if 'invest_data' not in st.session_state:
         {"項目": "メーター", "地点数": total_customers, "取得年月日": datetime(2020, 1, 1).date(), "方式": "標準係数", "実績額": 0, "減免": "減免しない"},
     ])
 
-# 【修正ポイント】エディタの出力を常にデータフレームとして処理
+# 表の表示
 edited_data = st.data_editor(st.session_state.invest_data, num_rows="dynamic", use_container_width=True)
-# セッションを更新
 st.session_state.invest_data = edited_data
 
-# --- 計算ループ ---
+# --- 計算ループ（エラーを徹底排除） ---
 calc_results = []
-# edited_data が DataFrame であることを保証してループ
-for i in range(len(edited_data)):
-    row = edited_data.iloc[i]
-    if not row.get("項目"): continue
-    
-    dt = pd.to_datetime(row.get("取得年月日"))
-    match = infra_master[(infra_master['start_dt'] <= dt) & (infra_master['end_dt'] >= dt)]
-    p_data = match.iloc[0] if not match.empty else None
-    
-    asset_name = row["項目"]
-    cfg = ASSET_CONFIG.get(asset_name, {"col": 4, "code": "???"})
-    
-    # 償却率の割り当て
-    asset_idx = list(ASSET_CONFIG.keys()).index(asset_name) if asset_name in ASSET_CONFIG else 0
-    current_rate = dep_rates[asset_idx] if asset_idx < len(dep_rates) else 0.03
-    
-    # 単価と投資額
-    u_price = float(p_data.iloc[cfg["col"]]) if p_data is not None else 0
-    invest = excel_round(row.get("実績額", 0), 0) if row.get("方式") == "実績値" else excel_round(float(row.get("地点数", 0)) * u_price, 0)
-    
-    dep = excel_round(invest * current_rate, 1)
-    is_exempt = (row.get("減免") == "減免する")
-    
-    calc_results.append({
-        "項目": asset_name,
-        "投資額①": 0 if is_exempt else invest,
-        "投資額②": invest if is_exempt else 0,
-        "償却費": dep
-    })
+if isinstance(edited_data, pd.DataFrame):
+    for i in range(len(edited_data)):
+        row = edited_data.iloc[i]
+        
+        # 項目がない行は計算せず無視する（エラー防止）
+        if not row.get("項目"): 
+            continue
+            
+        # 日付チェック
+        dt = pd.to_datetime(row.get("取得年月日"), errors='coerce')
+        if pd.isna(dt):
+            continue
 
-# --- 表示 ---
+        match = infra_master[(infra_master['start_dt'] <= dt) & (infra_master['end_dt'] >= dt)]
+        p_data = match.iloc[0] if not match.empty else None
+        
+        asset_name = row["項目"]
+        cfg = ASSET_CONFIG.get(asset_name, {"col": 4, "code": "???"})
+        
+        # 資産に応じた償却率
+        asset_keys = list(ASSET_CONFIG.keys())
+        asset_idx = asset_keys.index(asset_name) if asset_name in asset_keys else 0
+        current_rate = dep_rates[asset_idx] if asset_idx < len(dep_rates) else 0.03
+        
+        # 単価と投資額算出
+        try:
+            u_price = float(p_data.iloc[cfg["col"]]) if p_data is not None else 0
+            # 地点数や実績額が空(None)でも0として扱う
+            raw_customers = float(row.get("地点数", 0)) if not pd.isna(row.get("地点数")) else 0
+            raw_actual = float(row.get("実績額", 0)) if not pd.isna(row.get("実績額")) else 0
+            
+            invest = excel_round(raw_actual, 0) if row.get("方式") == "実績値" else excel_round(raw_customers * u_price, 0)
+            dep = excel_round(invest * current_rate, 1)
+        except:
+            invest, dep = 0, 0
+        
+        is_exempt = (row.get("減免") == "減免する")
+        
+        calc_results.append({
+            "項目": asset_name,
+            "投資額①": 0 if is_exempt else invest,
+            "投資額②": invest if is_exempt else 0,
+            "償却費": dep
+        })
+
+# --- 表示（カンマ区切りを適用） ---
 if calc_results:
     res_df = pd.DataFrame(calc_results)
     st.subheader("📊 算定結果サマリー")
     st.dataframe(
         res_df, 
         column_config={
-            "投資額①": st.column_config.NumberColumn(format="¥%,d"),
-            "投資額②": st.column_config.NumberColumn(format="¥%,d"),
-            "償却費": st.column_config.NumberColumn(format="¥%,.1f"),
+            "投資額①": st.column_config.NumberColumn("投資額①(通常)", format="¥%,d"),
+            "投資額②": st.column_config.NumberColumn("投資額②(減免)", format="¥%,d"),
+            "償却費": st.column_config.NumberColumn("減価償却費", format="¥%,.1f"),
         },
         use_container_width=True
     )
