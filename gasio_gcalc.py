@@ -13,7 +13,7 @@ def excel_round(value, decimals=0):
     except:
         return 0
 
-st.set_page_config(page_title="G-Calc Master: 完全修復版", layout="wide")
+st.set_page_config(page_title="G-Calc Master: 回路復旧版", layout="wide")
 st.title("🛡️ G-Calc Master: 投資・償却資産 算定要塞")
 
 EXCEL_FILE = "G-Calc_master.xlsx"
@@ -35,7 +35,6 @@ ASSET_CONFIG = {
 @st.cache_data
 def load_all_masters():
     try:
-        # Aシート読込
         df_a_raw = pd.read_excel(EXCEL_FILE, sheet_name='標準係数A', header=None)
         # 償却率: 5行目(Index 4), E列(Index 4)〜
         rates = pd.to_numeric(df_a_raw.iloc[4, 4:13], errors='coerce').fillna(0).tolist()
@@ -50,7 +49,6 @@ def load_all_masters():
         infra_m['start_dt'] = pd.to_datetime(infra_m.iloc[:, 2], errors='coerce') # C列
         infra_m['end_dt'] = infra_m.iloc[:, 3].apply(fix_date)                   # D列
         
-        # Bシート読込: C4開始
         df_b = pd.read_excel(EXCEL_FILE, sheet_name='標準係数B', skiprows=3, header=None)
         pref_m = df_b.iloc[:, [2, 4, 6]].dropna()
         pref_m.columns = ['pref', 'wage', 'gas_rate']
@@ -65,46 +63,45 @@ infra_master, dep_rates, pref_dict = load_all_masters()
 
 # --- UI ---
 st.sidebar.header("🌍 基本設定")
-selected_pref = st.sidebar.selectbox("都道府県", list(pref_dict.keys()), index=list(pref_dict.keys()).index("東京都") if "東京都" in pref_dict else 0)
+selected_pref = st.sidebar.selectbox("都道府県", list(pref_dict.keys()), index=0)
 total_customers = st.sidebar.number_input("許可地点数", value=245, step=1)
 
 st.header(f"🏗️ 分散取得・償却資産エディタ ({selected_pref})")
 
-# エディタの初期値
 if 'invest_data' not in st.session_state:
-    st.session_state.invest_data = [
+    st.session_state.invest_data = pd.DataFrame([
         {"項目": "建物", "地点数": total_customers, "取得年月日": datetime(1983, 1, 1).date(), "方式": "標準係数", "実績額": 0, "減免": "減免しない"},
         {"項目": "メーター", "地点数": total_customers, "取得年月日": datetime(2020, 1, 1).date(), "方式": "標準係数", "実績額": 0, "減免": "減免しない"},
-    ]
+    ])
 
-# 【重要】データエディタ。ここで入力を受け取る
-edited_df = st.data_editor(st.session_state.invest_data, num_rows="dynamic", use_container_width=True)
+# 【修正ポイント】エディタの出力を常にデータフレームとして処理
+edited_data = st.data_editor(st.session_state.invest_data, num_rows="dynamic", use_container_width=True)
+# セッションを更新
+st.session_state.invest_data = edited_data
 
-# --- 計算ループ (ここが断絶していた箇所) ---
+# --- 計算ループ ---
 calc_results = []
-for idx, row in edited_df.iterrows():
+# edited_data が DataFrame であることを保証してループ
+for i in range(len(edited_data)):
+    row = edited_data.iloc[i]
     if not row.get("項目"): continue
     
-    # 期間単価の特定
     dt = pd.to_datetime(row.get("取得年月日"))
     match = infra_master[(infra_master['start_dt'] <= dt) & (infra_master['end_dt'] >= dt)]
     p_data = match.iloc[0] if not match.empty else None
     
-    # 資産設定の取得
     asset_name = row["項目"]
     cfg = ASSET_CONFIG.get(asset_name, {"col": 4, "code": "???"})
     
-    # 償却率の取得 (インデックスを資産の並び順に合わせる)
+    # 償却率の割り当て
     asset_idx = list(ASSET_CONFIG.keys()).index(asset_name) if asset_name in ASSET_CONFIG else 0
     current_rate = dep_rates[asset_idx] if asset_idx < len(dep_rates) else 0.03
     
-    # 投資額算出
+    # 単価と投資額
     u_price = float(p_data.iloc[cfg["col"]]) if p_data is not None else 0
     invest = excel_round(row.get("実績額", 0), 0) if row.get("方式") == "実績値" else excel_round(float(row.get("地点数", 0)) * u_price, 0)
     
-    # 償却費算出
     dep = excel_round(invest * current_rate, 1)
-    
     is_exempt = (row.get("減免") == "減免する")
     
     calc_results.append({
@@ -114,7 +111,7 @@ for idx, row in edited_df.iterrows():
         "償却費": dep
     })
 
-# --- 結果の表示 ---
+# --- 表示 ---
 if calc_results:
     res_df = pd.DataFrame(calc_results)
     st.subheader("📊 算定結果サマリー")
@@ -128,7 +125,6 @@ if calc_results:
         use_container_width=True
     )
     
-    # 総括メトリクス
     st.divider()
     c1, c2, c3, c4 = st.columns(4)
     wage = pref_dict[selected_pref]['wage']
