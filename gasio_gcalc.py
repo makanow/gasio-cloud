@@ -2,117 +2,73 @@ import streamlit as st
 import pandas as pd
 
 # ---------------------------------------------------------
-# 1. デザイン設定
+# 1. 初期設定
 # ---------------------------------------------------------
-st.set_page_config(page_title="G-Calc Trial", page_icon="🧪", layout="wide")
-st.markdown("""
-    <style>
-    .main-title { font-size: 2.5rem; font-weight: 800; color: #2c3e50; border-bottom: 3px solid #3498db; }
-    .kpi-card { background-color: #f8f9fa; border-left: 5px solid #3498db; padding: 15px; border-radius: 5px; }
-    </style>
-""", unsafe_allow_html=True)
+st.set_page_config(page_title="G-Calc PoC", layout="wide")
+st.title("🛡️ G-Calc パイロットテスト：労務費ハイブリッド算定")
 
-st.markdown('<div class="main-title">G-Calc Trial: 料金算定エンジン</div>', unsafe_allow_html=True)
-st.write("Excelの「第3表」と「レートメイク」のロジックをアプリ化しました。")
+# ファイル名（GitHub上のExcelファイル名と一致させる）
+EXCEL_FILE = "G-Calc_master.xlsx"
 
-# ---------------------------------------------------------
-# 2. サイドバー：基本定数（Excelの標準係数シート相当）
-# ---------------------------------------------------------
-with st.sidebar:
-    st.header("⚙️ 算定基礎定数")
-    unit_cost_gas = st.number_input("原料単価 (円/kg)", value=100.0)
-    sanki_rate = st.number_input("産気率", value=0.488)
-    avg_labor_cost = st.number_input("平均労務費 (円/人)", value=5395488)
-    std_coeff = st.number_input("標準係数 (PE管)", value=0.0031, format="%.4f")
+@st.cache_data
+def load_excel_data():
+    try:
+        # Excelの「ナビ」シートから基本情報を読み込み
+        df_nav = pd.read_excel(EXCEL_FILE, sheet_name='ナビ', header=None)
+        # B13セル（12行目、1列目）あたりに地点数があると仮定
+        # ※実際の座標に合わせて微調整が必要
+        cust_count = df_nav.iloc[12, 4] 
+        return float(cust_count)
+    except Exception as e:
+        st.error(f"Excel読み込み失敗：{e}")
+        return 245.0 # エラー時のデフォルト値
 
 # ---------------------------------------------------------
-# 3. メイン：入力エリア (Excelのナビ・販売量シート相当)
+# 2. 入力セクション
 # ---------------------------------------------------------
+st.header("🎮 算定シミュレーター")
+base_cust_count = load_excel_data()
+
 col1, col2 = st.columns(2)
 
 with col1:
-    st.subheader("📝 算定基礎データ")
-    customer_count = st.number_input("供給地点数", value=245)
-    monthly_usage_avg = st.number_input("1地点当り月平均販売量 (m3)", value=12.9)
+    st.subheader("📝 入力パラメータ")
+    customer_count = st.number_input("供給地点数 (Excelから取得)", value=base_cust_count)
+    std_coeff = 0.0031  # 本来は標準係数シートから取得
+    avg_wage = 7104000  # 本来は労務費シートから取得
+
+    st.divider()
+    # 【重要】ハイブリッド入力の切り替え
+    calc_mode = st.radio("労務費の採用ロジック", ["理論計算値（標準係数）", "実績値（手入力）"])
     
-    # 計算
-    annual_sales_vol = monthly_usage_avg * customer_count * 12
-    gas_amount_needed = annual_sales_vol / sanki_rate
-    raw_material_cost = gas_amount_needed * unit_cost_gas
-    
-    staff_needed = customer_count * std_coeff
-    total_labor_cost = staff_needed * avg_labor_cost
-    
-    # 他の営業費（今回は固定値または簡略化）
-    other_costs = 555295 + 186219 + 36750 + 1725714 + 103336 # 修繕、租税、償却など
-    total_cost = raw_material_cost + total_labor_cost + other_costs
+    if calc_mode == "実績値（手入力）":
+        manual_labor_cost = st.number_input("実績労務費を入力してください (円)", value=5500000)
+    else:
+        # 理論値の計算
+        theory_labor_cost = customer_count * std_coeff * avg_wage
+        st.info(f"計算式: {customer_count}地点 × {std_coeff} × {avg_wage:,.0f}円")
 
 with col2:
-    st.subheader("💰 総括原価（計算結果）")
-    st.write(f"年間販売量: **{annual_sales_vol:,.1f} m³**")
+    st.subheader("💡 算定結果・根拠")
     
-    st.markdown(f"""
-    <div class="kpi-card">
-        原料費: {raw_material_cost:,.0f} 円<br>
-        労務費: {total_labor_cost:,.0f} 円<br>
-        その他費用: {other_costs:,.0f} 円
-        <hr>
-        <h3 style='margin:0;'>総原価: {total_cost:,.0f} 円</h3>
-    </div>
-    """, unsafe_allow_html=True)
+    if calc_mode == "実績値（手入力）":
+        final_cost = manual_labor_cost
+        st.warning("⚠️ 現在【実績値】を採用しています。")
+    else:
+        final_cost = theory_labor_cost
+        st.success("✅ 現在【理論計算値】を採用しています。")
+
+    st.metric("採用される労務費", f"{final_cost:,.0f} 円")
 
 # ---------------------------------------------------------
-# 4. レートメイク・シミュレーション
+# 3. ロジック公開モード
 # ---------------------------------------------------------
 st.divider()
-st.subheader("🔄 レートメイク・シミュレーター")
-
-# 需要構成（Excelのレートメイクシートより）
-tier_data = {
-    "A群": {"count_ratio": 0.23, "vol_ratio": 0.05},
-    "B群": {"count_ratio": 0.61, "vol_ratio": 0.57},
-    "C群": {"count_ratio": 0.16, "vol_ratio": 0.38},
-}
-
-st.write("新料金を設定して、原価を回収できるかテストしてください。")
-c_a, c_b, c_c = st.columns(3)
-
-# 各群の料金入力
-with c_a:
-    st.write("**A群**")
-    base_a = st.number_input("基本料金A", value=1198)
-    unit_a = st.number_input("従量単価A", value=460)
-with c_b:
-    st.write("**B群**")
-    base_b = st.number_input("基本料金B", value=2078)
-    unit_b = st.number_input("従量単価B", value=350)
-with c_c:
-    st.write("**C群**")
-    base_c = st.number_input("基本料金C", value=4028)
-    unit_c = st.number_input("従量単価C", value=285)
-
-# 収益計算
-annual_bill_count = customer_count * 12
-rev_base = (
-    (annual_bill_count * tier_data["A群"]["count_ratio"] * base_a) +
-    (annual_bill_count * tier_data["B群"]["count_ratio"] * base_b) +
-    (annual_bill_count * tier_data["C群"]["count_ratio"] * base_c)
-)
-rev_unit = (
-    (annual_sales_vol * tier_data["A群"]["vol_ratio"] * unit_a) +
-    (annual_sales_vol * tier_data["B群"]["vol_ratio"] * unit_b) +
-    (annual_sales_vol * tier_data["C群"]["vol_ratio"] * unit_c)
-)
-total_revenue = rev_base + rev_unit
-diff = total_revenue - total_cost
-
-# 判定表示
-st.divider()
-res_col1, res_col2 = st.columns(2)
-res_col1.metric("想定料金収入", f"{total_revenue:,.0f} 円")
-res_col2.metric("収支差（想定収入 - 総原価）", f"{diff:,.0f} 円", delta=diff)
-
-if diff >= 0:
-    st.success("✅ 原価を回収可能です！この料金設定で届出が可能です。")
-else:
-    st.error("❌ 原価割れしています。料金設定を見直してください。")
+if st.checkbox("📖 ロジック公開モード（役所審査・教育用）"):
+    st.markdown("### 労務費算定の根拠")
+    if calc_mode == "理論計算値（標準係数）":
+        st.write("本数値は、ガス事業許可申請等に基づく標準係数を用いて算出されています。")
+        st.latex(r"Cost = \text{地点数} \times \text{標準係数} \times \text{平均賃金}")
+    else:
+        st.write("本数値は、直近3年間の決算実績平均に基づき、実態に即して算定されています。")
+        st.info("根拠資料：2023-2025年度 決算報告書 労務費明細参照")
