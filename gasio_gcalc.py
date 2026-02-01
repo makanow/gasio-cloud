@@ -5,11 +5,12 @@ from datetime import datetime
 # ---------------------------------------------------------
 # 1. 初期設定
 # ---------------------------------------------------------
-st.set_page_config(page_title="G-Calc Master: 実務仕様", layout="wide")
+st.set_page_config(page_title="G-Calc Master: 実務完全版", layout="wide")
 st.title("🛡️ G-Calc Cloud: 投資・償却資産算定エンジン")
 
 EXCEL_FILE = "G-Calc_master.xlsx"
 
+# 資産項目と標準係数Aの列位置、償却率（コードは減免判定に使用）
 ASSET_INFO = {
     "建物": {"code": "TTM", "col": 3, "rate": 0.03},
     "構築物": {"code": "KCB", "col": 4, "rate": 0.1},
@@ -21,11 +22,16 @@ ASSET_INFO = {
     "導管・ＰＥ単独": {"code": "DPT", "col": 10, "rate": 0.077},
     "メーター": {"code": "MTR", "col": 11, "rate": 0.077},
     "備品": {"code": "BHN", "col": 12, "rate": 0.2},
-    "強制気化装置": {"code": "KKS", "col": 16, "rate": 0.1}
+    "強制気化装置": {"code": "KKS", "col": 16, "rate": 0.1},
+    "集合装置・バルク": {"code": "SSB", "col": 14, "rate": 0.1}
 }
 
+# 減免対象コード（ナガセのExcel数式に基づく）
+EXEMPT_CODES = ["SGS", "DKK", "DPK", "DKT", "DPT", "SSB"]
+EXEMPT_LIMIT_DATE = datetime(2017, 4, 1).date()
+
 # ---------------------------------------------------------
-# 2. マスタ読込ロジック
+# 2. マスタ読込と判定関数
 # ---------------------------------------------------------
 @st.cache_data
 def load_infra_master():
@@ -61,22 +67,21 @@ def find_period_info(target_date):
     return f"{last['start_dt'].strftime('%Y/%m/%d')} 〜 {last['end_dt'].strftime('%Y/%m/%d')}", last
 
 # ---------------------------------------------------------
-# 3. メインUI：入力（Session Stateで行を管理）
+# 3. メインUI
 # ---------------------------------------------------------
 st.sidebar.header("⚙️ 全体設定")
 total_customers = st.sidebar.number_input("許可地点数", value=245, step=1, format="%d")
 
-st.header("🏗️ 償却資産・分散取得エディタ")
+st.header("🏗️ 分散取得・償却資産エディタ")
+st.caption("取得日と項目に基づき、固定資産税の減免対象を自動判定します。")
 
-# セッション状態の初期化（ここで行の追加・削除を安定させる）
 if 'invest_df' not in st.session_state:
     st.session_state.invest_df = pd.DataFrame([
-        {"項目": "建物", "地点数": total_customers, "取得年月日": datetime(1983, 1, 1).date(), "減免対象": False, "算出方式": "標準係数", "実績投資額": 0},
-        {"項目": "導管・ＰＥ共同", "地点数": total_customers, "取得年月日": datetime(2015, 4, 1).date(), "減免対象": True, "算出方式": "標準係数", "実績投資額": 0},
-        {"項目": "メーター", "地点数": total_customers, "取得年月日": datetime(2020, 1, 1).date(), "減免対象": False, "算出方式": "標準係数", "実績投資額": 0},
+        {"項目": "建物", "地点数": total_customers, "取得年月日": datetime(1983, 1, 1).date(), "算出方式": "標準係数", "実績投資額": 0},
+        {"項目": "導管・ＰＥ共同", "地点数": total_customers, "取得年月日": datetime(2015, 4, 1).date(), "算出方式": "標準係数", "実績投資額": 0},
+        {"項目": "メーター", "地点数": total_customers, "取得年月日": datetime(2020, 1, 1).date(), "算出方式": "標準係数", "実績投資額": 0},
     ])
 
-# データエディタ（num_rows="dynamic"で行の追加・削除を有効化）
 edited_df = st.data_editor(
     st.session_state.invest_df,
     num_rows="dynamic",
@@ -84,22 +89,19 @@ edited_df = st.data_editor(
         "項目": st.column_config.SelectboxColumn("項目", options=list(ASSET_INFO.keys())),
         "取得年月日": st.column_config.DateColumn("取得年月日"),
         "算出方式": st.column_config.SelectboxColumn("方式", options=["標準係数", "実績値"]),
-        "実績投資額": st.column_config.NumberColumn("実績値(円)", format="%d"),
-        "減免対象": st.column_config.CheckboxColumn("減免"),
+        "実績投資額": st.column_config.NumberColumn("実績値(円)", format="%,d"),
     },
     use_container_width=True
 )
-# 編集結果をセッションに書き戻す
 st.session_state.invest_df = edited_df
 
 # ---------------------------------------------------------
-# 4. 計算ロジック（エラーガード付）
+# 4. 計算ロジック（自動減免判定搭載）
 # ---------------------------------------------------------
 results = []
 for index, row in edited_df.iterrows():
-    # 日付が空の場合は処理をスキップ
     if row["取得年月日"] is None or pd.isna(row["取得年月日"]):
-        results.append({"項目": row["項目"], "取得時期": "⚠️日付入力待ち", "地点数": row["地点数"], "投資額①": 0, "投資額②": 0, "減価償却費": 0, "code": "ERR"})
+        results.append({"項目": row["項目"], "取得時期": "⚠️日付入力待ち", "地点数": row["地点数"], "投資額①": 0, "投資額②": 0, "減免": "非対象", "減価償却費": 0, "code": "ERR"})
         continue
 
     p_label, p_data = find_period_info(row["取得年月日"])
@@ -111,20 +113,25 @@ for index, row in edited_df.iterrows():
     else:
         unit_price = p_data.iloc[info["col"]] if p_data is not None else 0
         invest_base = round(row["地点数"] * unit_price)
+    
+    # 【ナガセの数式：減免自動判定】
+    # IF(AND(取得日 <= 2017/4/1, 項目が対象グループ), 1, 0)
+    is_exempt = (row["取得年月日"] <= EXEMPT_LIMIT_DATE) and (info["code"] in EXEMPT_CODES)
         
-    inv1 = 0 if row["減免対象"] else invest_base
-    inv2 = invest_base if row["減免対象"] else 0
+    inv1 = 0 if is_exempt else invest_base
+    inv2 = invest_base if is_exempt else 0
     dep = invest_base * info["rate"]
     
     results.append({
         "項目": row["項目"], "取得時期": p_label, "地点数": row["地点数"], 
-        "投資額①": inv1, "投資額②": inv2, "減価償却費": dep, "code": info["code"]
+        "投資額①": inv1, "投資額②": inv2, "減免": "✅対象" if is_exempt else "－",
+        "減価償却費": dep, "code": info["code"]
     })
 
 res_df = pd.DataFrame(results)
 
 # ---------------------------------------------------------
-# 5. 表示とバリデーション
+# 5. 表示
 # ---------------------------------------------------------
 st.divider()
 if not res_df.empty:
@@ -132,25 +139,5 @@ if not res_df.empty:
     st.dataframe(
         res_df.drop(columns=["code"]),
         column_config={
-            "投資額①": st.column_config.NumberColumn("投資額①", format="¥%,d"),
-            "投資額②": st.column_config.NumberColumn("投資額②", format="¥%,d"),
-            "減価償却費": st.column_config.NumberColumn("減価償却費", format="¥%,.1f"),
-            "地点数": st.column_config.NumberColumn("地点数", format="%d"),
-        },
-        use_container_width=True
-    )
-
-    # 整合性チェック
-    pipe_sum = res_df[res_df["code"].isin(["DKK", "DPK", "DKT", "DPT"])]["地点数"].sum()
-    c1, c2 = st.columns(2)
-    with c1:
-        if pipe_sum == total_customers:
-            st.success(f"✅ 導管合計：{pipe_sum:,} / {total_customers:,}")
-        else:
-            st.error(f"❌ 導管合計：{pipe_sum:,} (目標：{total_customers:,})")
-
-    st.divider()
-    m1, m2, m3 = st.columns(3)
-    m1.metric("有形固定資産 投資額①", f"¥ {res_df['投資額①'].sum():,.0f}")
-    m2.metric("有形固定資産 投資額②", f"¥ {res_df['投資額②'].sum():,.0f}")
-    m3.metric("総 減価償却費", f"¥ {res_df['減価償却費'].sum():,.1f}")
+            "投資額①": st.column_config.NumberColumn("投資額①(非減免)", format="¥%,d"),
+            "投資額②": st.column_config.NumberColumn("
