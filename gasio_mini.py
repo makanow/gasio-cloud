@@ -17,8 +17,8 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.markdown('<div class="main-title"><span style="color:#2c3e50">Gas</span><span style="color:#e74c3c">i</span><span style="color:#3498db">o</span> mini</div>', unsafe_allow_html=True)
-st.markdown('<div class="sub-title">Current Status Visualizer (Consistent Structure Mode)</div>', unsafe_allow_html=True)
+st.markdown('<div class="main-title">Gasio mini</div>', unsafe_allow_html=True)
+st.markdown('<div class="sub-title">Current Status Visualizer (Robust Structure Mode)</div>', unsafe_allow_html=True)
 
 # ---------------------------------------------------------
 # 2. 関数定義
@@ -36,9 +36,9 @@ def normalize_columns(df):
     df = df.rename(columns=rename_map)
     if '料金表番号' not in df.columns: df['料金表番号'] = 10
     if '調定数' not in df.columns: df['調定数'] = 1
-    # 数値変換の安全化
+    # 数値変換
     if '使用量' in df.columns: df['使用量'] = pd.to_numeric(df['使用量'], errors='coerce').fillna(0)
-    if 'MAX' in df.columns: df['MAX'] = pd.to_numeric(df['MAX'], errors='coerce').fillna(99999)
+    if 'MAX' in df.columns: df['MAX'] = pd.to_numeric(df['MAX'], errors='coerce').fillna(999999999)
     return df
 
 def smart_load(file):
@@ -54,7 +54,6 @@ def smart_load(file):
 def get_tier_name(usage, tariff_df):
     if tariff_df.empty: return "Unknown"
     sorted_df = tariff_df.sort_values('MAX').reset_index(drop=True)
-    # 浮動小数点の誤差を考慮
     applicable = sorted_df[sorted_df['MAX'] >= (usage - 1e-9)]
     row = applicable.iloc[0] if not applicable.empty else sorted_df.iloc[-1]
     
@@ -66,54 +65,47 @@ def get_tier_name(usage, tariff_df):
     return letters[rank-1] if rank <= len(letters) else f"Tier{rank}"
 
 # ---------------------------------------------------------
-# 3. サイドバー
+# 3. メイン処理
 # ---------------------------------------------------------
 with st.sidebar:
     st.header("📂 Data Import")
     file_usage = st.file_uploader("1. 使用量CSV (実績)", type=['csv'])
     file_master = st.file_uploader("2. 料金表マスタCSV (定義)", type=['csv'])
 
-# ---------------------------------------------------------
-# 4. メイン処理
-# ---------------------------------------------------------
 if file_usage and file_master:
     df_usage = smart_load(file_usage)
     df_master = smart_load(file_master)
     
     if df_usage is not None and df_master is not None:
         usage_ids = sorted(df_usage['料金表番号'].unique())
-        
-        # 複数選択可能に
-        selected_ids = st.multiselect("分析対象の料金表番号を選択 (境界が一致すれば合算可能)", usage_ids, default=usage_ids[:1])
+        selected_ids = st.multiselect("分析対象の料金表番号を選択", usage_ids, default=usage_ids[:1])
         
         if not selected_ids:
             st.info("分析するIDを選択してください。")
             st.stop()
 
-        # --- 構造チェック (境界が一致するか？) ---
+        # --- 構造チェック (上限の揺らぎを吸収) ---
         structure_check = {}
         for tid in selected_ids:
             m_sub = df_master[df_master['料金表番号'] == tid]
             if not m_sub.empty:
-                # MAX値をソートしたタプルを構造の「指紋」とする
-                fingerprint = tuple(sorted(m_sub['MAX'].unique()))
-                structure_check[tid] = fingerprint
+                # MAX値をソートしたリストを取得
+                fps = sorted(m_sub['MAX'].unique())
+                # 【修正】一番最後の値（上限）を共通の巨大数値に固定して指紋とする
+                if fps:
+                    fps[-1] = 999999999
+                structure_check[tid] = tuple(fps)
         
         if len(set(structure_check.values())) > 1:
-            st.error("⚠️ 選択された料金表間で「区画の境界(MAX値)」が一致しません。合算分析は不可能です。")
+            st.error("⚠️ 境界線が一致しません。末尾の上限値以外の数値が異なっています。")
             st.stop()
 
-        # --- 集計処理 ---
+        # --- 集計 ---
         df_target = df_usage[df_usage['料金表番号'].isin(selected_ids)].copy()
-        # 構造は同じなので、代表として最初のIDのマスタを使用
         master_rep = df_master[df_master['料金表番号'] == selected_ids[0]].copy()
         
-        try:
-            df_target['Current_Tier'] = df_target['使用量'].apply(lambda x: get_tier_name(x, master_rep))
-        except Exception as e:
-            st.error(f"判定エラー: {e}")
-            st.stop()
-
+        df_target['Current_Tier'] = df_target['使用量'].apply(lambda x: get_tier_name(x, master_rep))
+        
         agg_df = df_target.groupby('Current_Tier').agg(
             調定数=('調定数', 'sum'),
             総使用量=('使用量', 'sum')
@@ -126,7 +118,7 @@ if file_usage and file_master:
         
         if total_count > 0:
             c1, c2, c3 = st.columns(3)
-            c1.metric("合計調定数", f"{total_count:,}")
+            c1.metric("合計調定数", f"{total_count:,.0f}")
             c2.metric("合計使用量", f"{total_vol:,.0f} m³")
             c3.metric("1件あたり平均", f"{total_vol/total_count:.1f} m³")
 
@@ -144,3 +136,5 @@ if file_usage and file_master:
             st.dataframe(agg_df[['Current_Tier', '調定数', '調定数構成比', '総使用量', '使用量構成比']], hide_index=True, use_container_width=True)
         else:
             st.warning("集計データがありません。")
+else:
+    st.info("👈 CSVをアップロードしてください。")
