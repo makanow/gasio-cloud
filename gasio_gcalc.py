@@ -13,8 +13,8 @@ def excel_round(value, decimals=0):
     except:
         return 0
 
-st.set_page_config(page_title="G-Calc Master: 最終修正版", layout="wide")
-st.title("🛡️ G-Calc Cloud: 投資・償却資産算定エンジン（最終修正）")
+st.set_page_config(page_title="G-Calc Master: 集大成版", layout="wide")
+st.title("🛡️ G-Calc Master: 総括原価算定要塞（Version 1.0）")
 
 EXCEL_FILE = "G-Calc_master.xlsx"
 
@@ -33,56 +33,74 @@ ASSET_INFO = {
     "強制気化装置": {"col": 16, "rate": 0.1, "code": "KKS"}
 }
 
-# --- マスタ読込 ---
+# --- 1. 都道府県マスタの読込 (標準係数B) ---
+@st.cache_data
+def load_pref_master():
+    try:
+        df_b = pd.read_excel(EXCEL_FILE, sheet_name='標準係数B', skiprows=3, header=None)
+        master = df_b.iloc[:, [2, 4, 6]].dropna()
+        master.columns = ['pref', 'wage', 'gas_rate']
+        return master.set_index('pref').to_dict('index')
+    except:
+        return {"東京都": {"wage": 7104000, "gas_rate": 0.488}}
+
+# --- 2. 投資期間マスタの読込 (標準係数A) ---
 @st.cache_data
 def load_infra_master():
     try:
-        # Excel読み込み。データが存在しない場合の防御
-        df = pd.read_excel(EXCEL_FILE, sheet_name='標準係数A', skiprows=2, header=None)
-        # HK（期間ID）を含む行のみ抽出
-        master = df[df.iloc[:, 1].astype(str).str.contains("HK", na=False)].copy()
+        df_a = pd.read_excel(EXCEL_FILE, sheet_name='標準係数A', skiprows=2, header=None)
+        master = df_a[df_a.iloc[:, 1].astype(str).str.contains("HK", na=False)].copy()
         master = master.iloc[:, 1:].reset_index(drop=True)
-        
         def fix_date(val):
             v_str = str(val).split(' ')[0]
             if "9999" in v_str: return pd.Timestamp("2100-12-31")
             return pd.to_datetime(v_str, errors='coerce')
-
         master['start_dt'] = master.iloc[:, 1].apply(fix_date)
         master['end_dt'] = master.iloc[:, 2].apply(fix_date)
         return master
-    except Exception as e:
-        st.error(f"マスタ読込エラー: {e}")
+    except:
         return pd.DataFrame()
 
+pref_dict = load_pref_master()
 infra_master = load_infra_master()
 
+# --- 判定ロジック ---
 def find_period_info(target_date):
     if infra_master.empty or target_date is None or pd.isna(target_date):
         return "⚠️日付未入力", None
-    try:
-        dt = pd.to_datetime(target_date)
-        match = infra_master[(infra_master['start_dt'] <= dt) & (infra_master['end_dt'] >= dt)]
-        if not match.empty:
-            row = match.iloc[0]
-            return f"{row['start_dt'].strftime('%Y/%m/%d')} 〜 {row['end_dt'].strftime('%Y/%m/%d')}", row
-        return f"{infra_master.iloc[-1]['start_dt'].strftime('%Y/%m/%d')} 〜", infra_master.iloc[-1]
-    except:
-        return "⚠️日付形式エラー", None
+    dt = pd.to_datetime(target_date)
+    match = infra_master[(infra_master['start_dt'] <= dt) & (infra_master['end_dt'] >= dt)]
+    if not match.empty:
+        row = match.iloc[0]
+        return f"{row['start_dt'].strftime('%Y/%m/%d')} 〜 {row['end_dt'].strftime('%Y/%m/%d')}", row
+    return "⚠️対象外期間", None
 
-# --- UI ---
-st.sidebar.header("⚙️ 設定")
-total_customers = st.sidebar.number_input("許可地点数", value=245)
+# --- UI：サイドバー ---
+st.sidebar.header("🌍 エリア・基本設定")
+selected_pref = st.sidebar.selectbox("対象都道府県", list(pref_dict.keys()), index=0)
+total_customers = st.sidebar.number_input("許可地点数 (整数)", value=245, step=1, format="%d")
 
-if 'invest_df' not in st.session_state:
-    st.session_state.invest_df = pd.DataFrame([
+pref_data = pref_dict[selected_pref]
+wage = pref_data['wage']
+gas_rate = pref_data['gas_rate']
+
+# --- UI：メイン入力 ---
+st.header(f"📍 {selected_pref} 要塞：投資・償却・労務費 統合算定")
+
+# 都道府県連動の指標
+c1, c2 = st.columns(2)
+with c1: st.info(f"標準労務単価: ¥ {wage:,.0f}")
+with c2: st.info(f"標準産気率: {gas_rate}")
+
+# 償却資産エディタ
+if 'full_invest_df' not in st.session_state:
+    st.session_state.full_invest_df = pd.DataFrame([
         {"項目": "建物", "地点数": total_customers, "取得年月日": datetime(1983, 1, 1).date(), "算出方式": "標準係数", "実績投資額": 0, "減免適用": "減免しない"},
         {"項目": "導管・ＰＥ共同", "地点数": total_customers, "取得年月日": datetime(2015, 4, 1).date(), "算出方式": "標準係数", "実績投資額": 0, "減免適用": "減免する"},
     ])
 
-# 編集用テーブル（カンマ区切り設定を強化）
 edited_df = st.data_editor(
-    st.session_state.invest_df,
+    st.session_state.full_invest_df,
     num_rows="dynamic",
     column_config={
         "地点数": st.column_config.NumberColumn(format="%,d"),
@@ -90,46 +108,37 @@ edited_df = st.data_editor(
     },
     use_container_width=True
 )
-st.session_state.invest_df = edited_df
+st.session_state.full_invest_df = edited_df
 
-# --- 計算（ガードを鉄壁に） ---
+# --- 計算（労務費 ＋ 投資償却費） ---
 results = []
 for idx, row in edited_df.iterrows():
-    # 必須項目が欠落している行はスキップ
-    if pd.isna(row.get("項目")) or row.get("項目") is None:
-        continue
-    
+    if pd.isna(row.get("項目")): continue
     p_label, p_data = find_period_info(row.get("取得年月日"))
     info = ASSET_INFO.get(row["項目"], {"col": 3, "rate": 0, "code": "???"})
     
-    # 単価取得
-    unit_price = 0
-    if p_data is not None:
-        try:
-            unit_price = p_data.iloc[info["col"]]
-        except:
-            unit_price = 0
-
-    # 投資額
+    # 投資額算出
     if row.get("算出方式") == "実績値":
         invest_base = excel_round(row.get("実績投資額", 0), 0)
     else:
+        unit_price = p_data.iloc[info["col"]] if p_data is not None else 0
         invest_base = excel_round(float(row.get("地点数", 0)) * unit_price, 0)
     
     is_exempt = (row.get("減免適用") == "減免する")
-    inv1 = 0 if is_exempt else invest_base
-    inv2 = invest_base if is_exempt else 0
-    dep = excel_round(invest_base * info["rate"], 1)
-    
     results.append({
-        "項目": row["項目"], "時期": p_label, "地点数": row.get("地点数", 0),
-        "投資額①": inv1, "投資額②": inv2, "償却費": dep, "code": info["code"]
+        "項目": row["項目"], "取得時期": p_label, "地点数": row.get("地点数", 0),
+        "投資額①": 0 if is_exempt else invest_base,
+        "投資額②": invest_base if is_exempt else 0,
+        "償却費": excel_round(invest_base * info["rate"], 1),
+        "code": info["code"]
     })
 
-# --- 表示（最終サマリー） ---
+res_df = pd.DataFrame(results)
+
+# --- 総括・表示 ---
 st.divider()
-if results:
-    res_df = pd.DataFrame(results)
+if not res_df.empty:
+    st.subheader("📊 算定サマリー (桁区切り)")
     st.dataframe(
         res_df.drop(columns=["code"]),
         column_config={
@@ -140,9 +149,20 @@ if results:
         },
         use_container_width=True
     )
-    
+
+    # 労務費計算
+    labor_cost = excel_round(total_customers * 0.0031 * wage, 0)
+
     st.divider()
-    m1, m2, m3 = st.columns(3)
-    m1.metric("有形固定資産 投資額①", f"¥ {res_df['投資額①'].sum():,.0f}")
-    m2.metric("有形固定資産 投資額②", f"¥ {res_df['投資額②'].sum():,.0f}")
-    m3.metric("総 減価償却費", f"¥ {res_df['償却費'].sum():,.1f}")
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("労務費合計", f"¥ {labor_cost:,.0f}")
+    m2.metric("投資額①合計", f"¥ {res_df['投資額①'].sum():,.0f}")
+    m3.metric("投資額②合計", f"¥ {res_df['投資額②'].sum():,.0f}")
+    m4.metric("総 減価償却費", f"¥ {res_df['償却費'].sum():,.1f}")
+
+# バリデーション
+pipe_sum = res_df[res_df["code"].isin(["DKK", "DPK", "DKT", "DPT"])]["地点数"].sum()
+if pipe_sum != total_customers:
+    st.error(f"❌ 導管合計：{pipe_sum:,} (目標：{total_customers:,})")
+else:
+    st.success(f"✅ 導管バリデーションOK")
