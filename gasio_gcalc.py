@@ -2,157 +2,106 @@ import streamlit as st
 import pandas as pd
 
 # ---------------------------------------------------------
-# 1. ページ構成と初期設定
+# 1. 初期設定
 # ---------------------------------------------------------
 st.set_page_config(page_title="G-Calc Master Cloud", layout="wide")
-st.title("🛡️ G-Calc Master: 要塞の心臓部（原価計算エンジン）")
+st.title("🛡️ G-Calc Master: 投資ロジック区分実装")
 
-# GitHubにアップロードしたExcelファイル名
 EXCEL_FILE = "G-Calc_master.xlsx"
 
 # ---------------------------------------------------------
-# 2. 賢いデータ抽出ロジック（座標指定型）
+# 2. 高度なデータ抽出エンジン
 # ---------------------------------------------------------
 @st.cache_data
-def load_full_master():
-    """標準係数Bシートから、都道府県ごとのマスタデータを座標で引っこ抜く"""
+def load_master_data():
+    """都道府県マスタ（賃金・産気率）を抽出"""
     try:
-        # 最初の数行の複雑な見出しをスキップし、データ行から読み込む
         df_b = pd.read_excel(EXCEL_FILE, sheet_name='標準係数B', skiprows=3, header=None)
-        
-        # 列のインデックスで指定 (2: 都道府県名, 4: 労務費, 6: 産気率)
-        # スニペット解析：1:コード, 2:県名, 3:標準値, 4:労務費, 5:換算係数, 6:産気率
-        master_df = df_b.iloc[:, [2, 4, 6]].dropna()
-        master_df.columns = ['pref', 'wage', 'gas_rate']
-        
-        # 都道府県名をキーにした辞書に変換
-        return master_df.set_index('pref').to_dict('index')
-    except Exception as e:
-        st.error(f"マスタデータのスキャンに失敗：{e}")
+        master = df_b.iloc[:, [2, 4, 6]].dropna()
+        master.columns = ['pref', 'wage', 'gas_rate']
+        return master.set_index('pref').to_dict('index')
+    except:
         return {"東京都": {"wage": 7104000, "gas_rate": 0.488}}
 
 @st.cache_data
-def get_initial_params():
-    """ナビシートから初期の地点数と原料単価を探す"""
+def get_infra_standard(period_id="HK13"):
+    """【インフラ用】標準係数Aから期間IDに基づき投資額を抽出"""
     try:
-        df_nav = pd.read_excel(EXCEL_FILE, sheet_name='ナビ', header=None)
-        count, price = 245, 100
-        for i, row in df_nav.iterrows():
-            row_list = [str(v).strip() for v in row.tolist()]
-            if "許可地点数*" in row_list:
-                idx = row_list.index("許可地点数*")
-                count = int(float(df_nav.iloc[i, idx + 1]))
-            if "原料単価*" in row_list:
-                idx = row_list.index("原料単価*")
-                price = float(df_nav.iloc[i, idx + 1])
-        return count, price
+        df_a = pd.read_excel(EXCEL_FILE, sheet_name='標準係数A', skiprows=2)
+        # 期間ID（HK13等）で検索し、建物(TTM)や構築物(KCB)の単価を返す
+        target_row = df_a[df_a.iloc[:, 0] == period_id]
+        return {
+            "建物": float(target_row['建物'].values[0]),
+            "構築物": float(target_row['構築物'].values[0]),
+            "メーター": float(target_row['メーター'].values[0])
+        }
     except:
-        return 245, 100
+        return {"建物": 8770, "構築物": 1450, "メーター": 5570}
 
-# --- データの準備 ---
-with st.spinner('要塞のデータを読み込み中...'):
-    master_dict = load_full_master()
-    initial_count, excel_raw_price = get_initial_params()
-
-# ---------------------------------------------------------
-# 3. サイドバー：エリア・条件設定
-# ---------------------------------------------------------
-st.sidebar.header("🌍 エリア・条件設定")
-
-# 都道府県の選択（Excelから自動生成されたリスト）
-selected_pref = st.sidebar.selectbox(
-    "対象の都道府県を選択", 
-    list(master_dict.keys()), 
-    index=list(master_dict.keys()).index("東京都") if "東京都" in master_dict else 0
-)
-
-# 選択された県のマスタ値
-pref_data = master_dict[selected_pref]
-auto_wage = pref_data['wage']
-auto_gas_rate = pref_data['gas_rate']
-
-# 計算用パラメータ
-monthly_sales_avg = st.sidebar.number_input("平均月間販売量 (m3/件)", value=12.9, step=0.1)
-raw_price = st.sidebar.number_input("原料仕入れ単価 (円/kg)", value=float(excel_raw_price), step=1.0)
+def get_vehicle_ca_unit(count):
+    """【車両専用】地点数からCA区分を判定し、単価を返す"""
+    if count <= 250:   return 7270, "CA1"
+    elif count <= 1000: return 5450, "CA2"
+    elif count <= 2000: return 4540, "CA3"
+    elif count <= 3000: return 4240, "CA4"
+    elif count <= 4000: return 4090, "CA5"
+    elif count <= 5000: return 4000, "CA6"
+    elif count <= 6000: return 3790, "CA7"
+    else:               return 3640, "CA8"
 
 # ---------------------------------------------------------
-# 4. メイン画面：入力・算定エリア
+# 3. メインUI
 # ---------------------------------------------------------
-st.header(f"📍 {selected_pref} エリア：算定コックピット")
+master_dict = load_master_data()
+
+st.sidebar.header("🌍 エリア・期間設定")
+selected_pref = st.sidebar.selectbox("都道府県", list(master_dict.keys()), index=0)
+selected_period = st.sidebar.selectbox("適用期間ID", ["HK13", "HK12", "HK11"], index=0)
+
+st.header(f"📍 {selected_pref} エリア：複合投資算定シミュレーション")
 
 col1, col2 = st.columns(2)
 
 with col1:
-    st.subheader("🔢 変数入力")
-    # 地点数は整数(int)で入力、小数点なし
-    customer_count = st.number_input(
-        "供給地点数 (a2)", 
-        value=int(initial_count), 
-        step=1, 
-        format="%d"
-    )
+    st.subheader("🔢 供給条件")
+    customer_count = st.number_input("供給地点数", value=245, step=1, format="%d")
     
     st.divider()
-    
-    # 【ハイブリッド選択：理論 vs 実績】
-    calc_mode = st.radio(
-        "労務費の決定方法",
-        ["標準係数マスタ参照", "実績値で上書き"],
-        help="基本はマスタ参照ですが、特段の理由（決算実績など）がある場合は実績値を入力してください。"
-    )
-
-    if calc_mode == "実績値で上書き":
-        applied_wage = st.number_input("実績単価（円/人）", value=int(auto_wage), step=1000)
-    else:
-        applied_wage = auto_wage
-        st.info(f"✅ {selected_pref} の標準労務費 {auto_wage:,.0f}円 を適用中")
+    st.subheader("🚐 車両運搬具（CAルール）")
+    v_unit, ca_code = get_vehicle_ca_unit(customer_count)
+    st.info(f"車両区分: **{ca_code}** が自動適用されました")
+    st.write(f"車両標準単価: {v_unit:,.0f} 円/地点")
 
 with col2:
-    st.subheader("📊 主要原価の算定結果")
+    st.subheader("🏗️ インフラ資産（HKルール）")
+    infra_data = get_infra_standard(selected_period)
+    st.info(f"期間ID: **{selected_period}** の標準値を適用中")
     
-    # --- 労務費の計算 ---
-    std_coeff = 0.0031 # 標準係数（PE管）
-    labor_cost = customer_count * std_coeff * applied_wage
+    # 計算と表示
+    building_invest = infra_data['建物'] * customer_count
+    meter_invest = infra_data['メーター'] * customer_count
+    vehicle_invest = v_unit * customer_count
     
-    # --- 原料費の計算 ---
-    # 販売量 = 地点数 * 月平均 * 12ヶ月
-    total_sales_volume = customer_count * monthly_sales_avg * 12
-    # 必要原料数量 = 販売量 / 産気率
-    raw_material_qty = total_sales_volume / auto_gas_rate
-    # 原料費 = 数量 * 単価
-    raw_material_cost = raw_material_qty * raw_price
-    
-    # 結果の表示
-    st.metric("算定労務費", f"{labor_cost:,.0f} 円")
-    st.metric("算定原料費", f"{raw_material_cost:,.0f} 円", delta=f"産気率: {auto_gas_rate}")
-    
-    st.divider()
-    total_main_costs = labor_cost + raw_material_cost
-    st.subheader(f"主要原価合計: {total_main_costs:,.0f} 円")
+    st.write(f"建物投資額: {building_invest:,.0f} 円")
+    st.write(f"メーター投資額: {meter_invest:,.0f} 円")
+    st.metric("車両投資額", f"{vehicle_invest:,.0f} 円")
 
 # ---------------------------------------------------------
-# 5. ロジック公開モード（ナガセ・スペシャル）
+# 4. ロジック公開モード：ルールの違いを明示
 # ---------------------------------------------------------
 st.divider()
-show_logic = st.checkbox("📖 ロジック公開モードを起動（審査・教育用）")
-
-if show_logic:
-    st.info(f"【{selected_pref}】の算定ロジックを解剖中")
+if st.checkbox("📖 投資算定ロジックの違いを解説"):
+    st.markdown("""
+    ### ⚠️ 投資区分ルールの使い分け
+    本アプリでは、ガス事業の算定規則に基づき、以下の通りロジックを使い分けています。
+    """)
     
-    logic_col1, logic_col2 = st.columns(2)
-    
-    with logic_col1:
-        st.write("**労務費の算定根拠**")
-        st.latex(rf"{customer_count} \text{{ 地点}} \times {std_coeff} \times {applied_wage:,.0f} \text{{ 円}} = {labor_cost:,.0f} \text{{ 円}}")
-        st.caption("※標準係数(0.0031)は「PE管供給」を前提とした標準人員数です。")
-
-    with logic_col2:
-        st.write("**原料費の算定根拠**")
-        st.latex(rf"\frac{{{total_sales_volume:,.0f} m^3}}{{{auto_gas_rate}}} \times {raw_price} \text{{ 円/kg}} = {raw_material_cost:,.0f} \text{{ 円}}")
-        st.caption(f"※{selected_pref}の標準産気率（{auto_gas_rate}）を使用して原料数量を逆算。")
-
-# ---------------------------------------------------------
-# 6. フッター
-# ---------------------------------------------------------
-st.sidebar.divider()
-st.sidebar.caption("G-Calc Cloud PoC v1.2")
+    c1, c2 = st.columns(2)
+    with c1:
+        st.success("**【車両運搬具】地点数連動型 (CA)**")
+        st.write(f"現在の地点数 {customer_count} に基づき、**{ca_code}** の単価を採用しています。")
+        st.caption("※地点数が閾値を超えると自動的に単価が切り替わります。")
+    with c2:
+        st.info("**【その他資産】期間ID固定型 (HK)**")
+        st.write(f"選択された期間 **{selected_period}** に基づき、建物の単価 {infra_data['建物']:,.0f}円 等を採用しています。")
+        st.caption("※こちらは地点数によって単価自体は変動しません。")
