@@ -3,15 +3,14 @@ import pandas as pd
 from datetime import datetime
 from decimal import Decimal, ROUND_HALF_UP
 
-# --- Excel互換の四捨五入関数 ---
+# --- Excel互換の四捨五入 ---
 def excel_round(value, decimals=0):
-    if pd.isna(value): return 0
+    if pd.isna(value) or value is None: return 0
     d = Decimal(str(value))
     exp = Decimal('1') if decimals == 0 else Decimal('0.' + '0' * (decimals - 1) + '1')
     return float(d.quantize(exp, rounding=ROUND_HALF_UP))
 
-# --- 初期設定 ---
-st.set_page_config(page_title="G-Calc Master: 完全検算版", layout="wide")
+st.set_page_config(page_title="G-Calc Master: 最終検算版", layout="wide")
 st.title("🛡️ G-Calc Cloud: 投資・償却資産算定エンジン")
 
 EXCEL_FILE = "G-Calc_master.xlsx"
@@ -30,32 +29,37 @@ ASSET_INFO = {
     "強制気化装置": {"code": "KKS", "col": 16, "rate": 0.1}
 }
 
-# 減免判定基準（アドバイス用）
 EXEMPT_CODES = ["SGS", "DKK", "DPK", "DKT", "DPT", "SSB"]
 EXEMPT_LIMIT_DATE = datetime(2017, 4, 1).date()
 
-# --- マスタ読み込み ---
+# --- マスタ読込（エラーガード強化） ---
 @st.cache_data
 def load_infra_master():
     try:
         df = pd.read_excel(EXCEL_FILE, sheet_name='標準係数A', skiprows=2, header=None)
+        # HKを含む行を抽出
         master = df[df.iloc[:, 1].astype(str).str.contains("HK", na=False)].copy()
         master = master.iloc[:, 1:].reset_index(drop=True)
+        
         def fix_date(val):
             v_str = str(val).split(' ')[0]
-            return pd.Timestamp("2100-12-31") if "9999" in v_str else pd.to_datetime(v_str, errors='coerce')
+            if "9999" in v_str: return pd.Timestamp("2100-12-31")
+            return pd.to_datetime(v_str, errors='coerce')
+
         master['start_dt'] = master.iloc[:, 1].apply(fix_date)
         master['end_dt'] = master.iloc[:, 2].apply(fix_date)
         return master
     except Exception as e:
-        st.error(f"マスタ読み込み失敗：{e}")
+        st.error(f"⚠️ マスタ読込失敗。Excelのシート名「標準係数A」を確認してください: {e}")
         return pd.DataFrame()
 
 infra_master = load_infra_master()
 
 def find_period_info(target_date):
-    if infra_master.empty or target_date is None: return "日付未入力", None
+    if infra_master.empty or target_date is None: 
+        return "⚠️判定不可(マスタ空)", None
     dt = pd.to_datetime(target_date)
+    # 型を揃えて比較
     match = infra_master[(infra_master['start_dt'] <= dt) & (infra_master['end_dt'] >= dt)]
     if not match.empty:
         row = match.iloc[0]
@@ -63,47 +67,38 @@ def find_period_info(target_date):
     last = infra_master.iloc[-1]
     return f"{last['start_dt'].strftime('%Y/%m/%d')} 〜 {last['end_dt'].strftime('%Y/%m/%d')}", last
 
-# --- UI：入力 ---
+# --- UI ---
 st.sidebar.header("⚙️ 全体設定")
-total_customers = st.sidebar.number_input("許可地点数", value=245, step=1, format="%d")
-
-st.header("🏗️ 分散取得・償却資産エディタ")
+total_customers = st.sidebar.number_input("許可地点数", value=245, step=1)
 
 if 'invest_df' not in st.session_state:
     st.session_state.invest_df = pd.DataFrame([
         {"項目": "建物", "地点数": total_customers, "取得年月日": datetime(1983, 1, 1).date(), "算出方式": "標準係数", "実績投資額": 0, "減免適用": "減免しない"},
         {"項目": "導管・ＰＥ共同", "地点数": total_customers, "取得年月日": datetime(2015, 4, 1).date(), "算出方式": "標準係数", "実績投資額": 0, "減免適用": "減免する"},
-        {"項目": "メーター", "地点数": total_customers, "取得年月日": datetime(2020, 1, 1).date(), "算出方式": "標準係数", "実績投資額": 0, "減免適用": "減免しない"},
     ])
 
+# エディタの桁区切り設定
 edited_df = st.data_editor(
     st.session_state.invest_df,
     num_rows="dynamic",
     column_config={
-        "項目": st.column_config.SelectboxColumn("項目", options=list(ASSET_INFO.keys())),
-        "取得年月日": st.column_config.DateColumn("取得年月日"),
-        "算出方式": st.column_config.SelectboxColumn("方式", options=["標準係数", "実績値"]),
         "実績投資額": st.column_config.NumberColumn("実績値(円)", format="%,d"),
-        "減免適用": st.column_config.SelectboxColumn("減免適用", options=["減免する", "減免しない"]),
         "地点数": st.column_config.NumberColumn("地点数", format="%,d"),
     },
     use_container_width=True
 )
 st.session_state.invest_df = edited_df
 
-# --- 計算（エラーガード付） ---
+# --- 計算 ---
 results = []
 for index, row in edited_df.iterrows():
     if row["取得年月日"] is None or pd.isna(row["取得年月日"]):
-        results.append({"項目": row["項目"], "取得時期": "⚠️日付入力待ち", "地点数": row["地点数"], "投資額①": 0, "投資額②": 0, "助言": "－", "減価償却費": 0, "code": "ERR"})
+        results.append({"項目": row["項目"], "取得時期": "⚠️日付入力待ち", "地点数": row["地点数"], "投資額①": 0, "投資額②": 0, "減価償却費": 0, "code": "ERR"})
         continue
 
     p_label, p_data = find_period_info(row["取得年月日"])
     info = ASSET_INFO.get(row["項目"], {"code": "UNKNOWN", "col": 3, "rate": 0})
     
-    is_recommend = (row["取得年月日"] <= EXEMPT_LIMIT_DATE) and (info["code"] in EXEMPT_CODES)
-    advice = "💡推奨" if is_recommend else "－"
-
     if row["算出方式"] == "実績値":
         invest_base = excel_round(row["実績投資額"], 0)
     else:
@@ -115,19 +110,19 @@ for index, row in edited_df.iterrows():
     inv2 = invest_base if is_exempt else 0
     dep = excel_round(invest_base * info["rate"], 1)
     
-    results.append({"項目": row["項目"], "取得時期": p_label, "地点数": row["地点数"], "投資額①": inv1, "投資額②": inv2, "助言": advice, "減価償却費": dep, "code": info["code"]})
+    results.append({"項目": row["項目"], "取得時期": p_label, "地点数": row["地点数"], "投資額①": inv1, "投資額②": inv2, "減価償却費": dep, "code": info["code"]})
 
 res_df = pd.DataFrame(results)
 
-# --- 表示（徹底した桁区切り） ---
+# --- 表示（カンマ強制） ---
 st.divider()
 if not res_df.empty:
     st.subheader("📊 算定結果サマリー")
     st.dataframe(
         res_df.drop(columns=["code"]),
         column_config={
-            "投資額①": st.column_config.NumberColumn("投資額①(通常)", format="¥%,d"),
-            "投資額②": st.column_config.NumberColumn("投資額②(減免)", format="¥%,d"),
+            "投資額①": st.column_config.NumberColumn("投資額①", format="¥%,d"),
+            "投資額②": st.column_config.NumberColumn("投資額②", format="¥%,d"),
             "減価償却費": st.column_config.NumberColumn("減価償却費", format="¥%,.1f"),
             "地点数": st.column_config.NumberColumn("地点数", format="%,d"),
         },
@@ -136,13 +131,6 @@ if not res_df.empty:
     
     st.divider()
     m1, m2, m3 = st.columns(3)
-    m1.metric("投資額① (合計)", f"¥ {res_df['投資額①'].sum():,.0f}")
-    m2.metric("投資額② (合計)", f"¥ {res_df['投資額②'].sum():,.0f}")
+    m1.metric("投資額① 合計", f"¥ {res_df['投資額①'].sum():,.0f}")
+    m2.metric("投資額② 合計", f"¥ {res_df['投資額②'].sum():,.0f}")
     m3.metric("総 減価償却費", f"¥ {res_df['減価償却費'].sum():,.1f}")
-
-    # バリデーション
-    pipe_sum = res_df[res_df["code"].isin(["DKK", "DPK", "DKT", "DPT"])]["地点数"].sum()
-    if pipe_sum == total_customers:
-        st.success(f"✅ 導管合計：{pipe_sum:,} / {total_customers:,}")
-    else:
-        st.error(f"❌ 導管合計：{pipe_sum:,} (不足：{total_customers - pipe_sum:,})")
