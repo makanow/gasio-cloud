@@ -1,129 +1,234 @@
 import streamlit as st
 import pandas as pd
-import plotly.express as px
 import numpy as np
 
 # ---------------------------------------------------------
 # 1. 設定 & デザイン
 # ---------------------------------------------------------
-st.set_page_config(page_title="Gasio mini", page_icon="🔥", layout="wide")
+st.set_page_config(page_title="Gasio 電卓", page_icon="🧮", layout="wide")
 
 st.markdown("""
-    <style>
-    .block-container { padding-top: 2rem; }
-    .main-title { font-size: 3rem; font-weight: 800; color: #2c3e50; text-align: left; margin-bottom: 0; }
-    .sub-title { font-size: 1.2rem; color: #7f8c8d; text-align: left; border-bottom: 2px solid #3498db; padding-bottom: 10px; margin-bottom: 20px;}
-    .stMetric { background-color: #f8f9fa; border-radius: 5px; padding: 10px; border-left: 4px solid #3498db; }
-    </style>
+    <style>
+    .block-container { padding-top: 2rem; }
+    .main-title { font-size: 3rem; font-weight: 800; color: #2c3e50; margin-bottom: 0; }
+    .sub-title { font-size: 1.2rem; color: #7f8c8d; border-bottom: 2px solid #e74c3c; padding-bottom: 10px; margin-bottom: 20px;}
+    .stNumberInput input { font-weight: bold; color: #2c3e50; background-color: #fff; border: 2px solid #3498db; }
+    /* 入力フォームを目立たせる */
+    </style>
 """, unsafe_allow_html=True)
 
-st.markdown('<div class="main-title">Gasio mini</div>', unsafe_allow_html=True)
-st.markdown('<div class="sub-title">Unified Usage Analyzer</div>', unsafe_allow_html=True)
+st.markdown('<div class="main-title"><span style="color:#2c3e50">Gas</span><span style="color:#e74c3c">i</span><span style="color:#3498db">o</span> 電卓</div>', unsafe_allow_html=True)
+st.markdown('<div class="sub-title">Rate Design Solver</div>', unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# 2. 関数定義
+# 2. 計算ロジック
 # ---------------------------------------------------------
-def normalize_columns(df):
-    rename_map = {
-        '基本': '基本料金', '上限': 'MAX', '下限': 'MIN', 'ID': '料金表番号',
-        '適用上限': 'MAX', 'Usage': '使用量', 'Vol': '使用量', '調定': '調定数'
-    }
-    df = df.rename(columns=rename_map)
-    if '料金表番号' not in df.columns: df['料金表番号'] = 10
-    if '調定数' not in df.columns: df['調定数'] = 1
-    return df
+def solve_base(df_input, base_a):
+    df = df_input.copy().sort_values('No').reset_index(drop=True)
+    if df.empty: return {}
+    
+    first_no = df.iloc[0]['No']
+    bases = {first_no: base_a}
+    
+    for i in range(1, len(df)):
+        prev_row = df.iloc[i-1]
+        curr_row = df.iloc[i]
+        curr_no, prev_no = curr_row['No'], prev_row['No']
+        
+        limit_prev = prev_row['適用上限(m3)']
+        unit_prev = prev_row['単位料金']
+        unit_curr = curr_row['単位料金']
+        
+        base_prev = bases.get(prev_no, 0)
+        base_curr = base_prev + (unit_prev - unit_curr) * limit_prev
+        bases[curr_no] = base_curr
+    return bases
 
-def smart_load(file):
-    for enc in ['utf-8', 'cp932', 'shift_jis']:
-        try:
-            file.seek(0)
-            df = pd.read_csv(file, encoding=enc)
-            df.columns = df.columns.astype(str).str.strip()
-            return normalize_columns(df)
-        except: continue
-    return None
+def solve_unit(df_input, base_a, unit_a):
+    df = df_input.copy().sort_values('No').reset_index(drop=True)
+    if df.empty: return {}
 
-def get_tier_name(usage, tariff_df):
-    """
-    IDが変わっても、境界(MAX)に基づいて代表マスタの「区画名」を返す。
-    """
-    if tariff_df.empty: return "Unknown"
-    # MAXでソート。上限揺らぎを考慮
-    sorted_df = tariff_df.sort_values('MAX').reset_index(drop=True)
-    applicable = sorted_df[sorted_df['MAX'] >= (usage - 1e-9)]
-    row = applicable.iloc[0] if not applicable.empty else sorted_df.iloc[-1]
-    
-    # マスタにある「区画名」や「区画」を優先的に返す
-    if '区画名' in row and pd.notna(row['区画名']): return str(row['区画名'])
-    if '区画' in row and pd.notna(row['区画']): return str(row['区画'])
-    
-    rank = row.name + 1
-    return f"Tier {rank}"
+    first_no = df.iloc[0]['No']
+    units = {first_no: unit_a}
+    
+    input_bases = {first_no: base_a}
+    for idx, row in df.iterrows():
+        if idx > 0: input_bases[row['No']] = row['基本料金(入力)']
+
+    for i in range(1, len(df)):
+        prev_row = df.iloc[i-1]
+        curr_row = df.iloc[i]
+        curr_no, prev_no = curr_row['No'], prev_row['No']
+        
+        limit_prev = prev_row['適用上限(m3)']
+        base_prev = input_bases.get(prev_no, 0)
+        base_curr = input_bases.get(curr_no, 0)
+        unit_prev = units.get(prev_no, 0)
+        
+        if limit_prev > 0:
+            unit_curr = unit_prev - (base_curr - base_prev) / limit_prev
+        else:
+            unit_curr = 0
+        units[curr_no] = unit_curr
+    return units
 
 # ---------------------------------------------------------
-# 3. メイン処理
+# 3. UI
 # ---------------------------------------------------------
-with st.sidebar:
-    st.header("📂 Data Import")
-    file_usage = st.file_uploader("1. 使用量CSV", type=['csv'])
-    file_master = st.file_uploader("2. 料金表マスタCSV", type=['csv'])
+if 'calc_data' not in st.session_state:
+    st.session_state.calc_data = pd.DataFrame({
+        'No': [1, 2, 3],
+        '区画名': ['A', 'B', 'C'],
+        '適用上限(m3)': [8.0, 30.0, 99999.0],
+        '基本料金(入力)': [1500.0, 2300.0, 5300.0],
+        '単位料金(入力)': [500.0, 400.0, 300.0]
+    })
 
-if file_usage and file_master:
-    df_usage = smart_load(file_usage)
-    df_master = smart_load(file_master)
-    
-    if df_usage is not None and df_master is not None:
-        usage_ids = sorted(df_usage['料金表番号'].unique())
-        selected_ids = st.multiselect("料金表番号を選択 (合算表示)", usage_ids, default=usage_ids[:1])
+tab1, tab2 = st.tabs(["🔄 従量料金基準", "🧮 基本料金基準"])
 
-        if selected_ids:
-            # 構造指紋チェック (上限揺らぎ吸収)
-            fps = {}
-            for tid in selected_ids:
-                m_sub = df_master[df_master['料金表番号'] == tid]
-                if not m_sub.empty:
-                    m_fps = sorted(pd.to_numeric(m_sub['MAX'], errors='coerce').fillna(9999999).unique())
-                    if m_fps: m_fps[-1] = 9999999 # 末尾固定
-                    fps[tid] = tuple(m_fps)
-            
-            if len(set(fps.values())) > 1:
-                st.error("⚠️ 境界線が異なるため合算できません。")
-                st.stop()
+# === Tab 1: 従量料金基準 ===
+with tab1:
+    st.info("💡 **操作ガイド**: 左側の表にある「✏️」マークがついた列が入力可能です。")
+    
+    c1, c2 = st.columns([1, 1])
+    with c1:
+        st.markdown("##### 1. パラメータ入力 (Input)")
+        base_a_fwd = st.number_input("✏️ A区画 基本料金", value=1500.0, step=10.0, key="fwd_base_a")
+        
+        edited_fwd = st.data_editor(
+            st.session_state.calc_data[['No', '区画名', '適用上限(m3)', '単位料金(入力)']],
+            column_config={
+                "No": st.column_config.NumberColumn(
+                    label="🔒 No", 
+                    disabled=True, 
+                    width=60
+                ),
+                "区画名": st.column_config.TextColumn(
+                    label="🔒 区画", 
+                    disabled=True, 
+                    width=80
+                ),
+                "適用上限(m3)": st.column_config.NumberColumn(
+                    label="✏️ 適用上限 (変更可)", 
+                    help="区画の境界値を変更します", 
+                    format="%.1f",
+                    required=True
+                ),
+                "単位料金(入力)": st.column_config.NumberColumn(
+                    label="✏️ 単位料金 (入力)", 
+                    help="ここを変数として入力します", 
+                    format="%.2f",
+                    required=True
+                )
+            },
+            num_rows="dynamic",
+            use_container_width=True,
+            key="editor_fwd"
+        )
+        
+    with c2:
+        st.markdown("##### 2. 計算結果 (Result)")
+        if not edited_fwd.empty:
+            calc_df = edited_fwd.rename(columns={'単位料金(入力)': '単位料金'})
+            calc_df['単位料金'] = pd.to_numeric(calc_df['単位料金'], errors='coerce').fillna(0)
+            calc_df['適用上限(m3)'] = pd.to_numeric(calc_df['適用上限(m3)'], errors='coerce').fillna(0)
+            
+            res_bases = solve_base(calc_df, base_a_fwd)
+            
+            res_list = []
+            for idx, row in calc_df.sort_values('No').iterrows():
+                no = row['No']
+                res_list.append({
+                    "No": no,
+                    "区画": row['区画名'],
+                    "適用上限": row['適用上限(m3)'],
+                    "基本料金 (算出)": res_bases.get(no, 0),
+                    "単位料金": row['単位料金']
+                })
+            
+            # 色付け廃止、シンプル表示
+            st.dataframe(
+                pd.DataFrame(res_list).set_index('No').style.format({
+                    "適用上限": "{:,.1f}",
+                    "基本料金 (算出)": "{:,.2f}", 
+                    "単位料金": "{:,.2f}"
+                }),
+                use_container_width=True,
+                height=400
+            )
 
-            # --- 集計 ---
-            df_target = df_usage[df_usage['料金表番号'].isin(selected_ids)].copy()
-            # 代表として最初のIDのマスタラベルを使用
-            master_rep = df_master[df_master['料金表番号'] == selected_ids[0]].copy()
-            master_rep['MAX'] = pd.to_numeric(master_rep['MAX'], errors='coerce').fillna(9999999)
+# === Tab 2: 基本料金基準 ===
+with tab2:
+    st.info("💡 **操作ガイド**: 左側の表にある「✏️」マークがついた列が入力可能です。")
+    
+    c1, c2 = st.columns([1, 1])
+    with c1:
+        st.markdown("##### 1. パラメータ入力 (Input)")
+        cs1, cs2 = st.columns(2)
+        base_a_rev = cs1.number_input("✏️ A区画 基本料金", value=1500.0, step=10.0, key="rev_base_a")
+        unit_a_rev = cs2.number_input("✏️ A区画 単位料金", value=500.0, step=1.0, key="rev_unit_a")
 
-            df_target['Current_Tier'] = df_target['使用量'].apply(lambda x: get_tier_name(x, master_rep))
-            
-            agg_df = df_target.groupby('Current_Tier').agg({'調定数': 'sum', '使用量': 'sum'}).reset_index()
-            
-            # 並び順をマスタの出現順に固定
-            labels_in_order = [get_tier_name(r['MAX']-1e-6, master_rep) for _, r in master_rep.sort_values('MAX').iterrows()]
-            agg_df['order'] = agg_df['Current_Tier'].apply(lambda x: labels_in_order.index(x) if x in labels_in_order else 99)
-            agg_df = agg_df.sort_values('order').drop(columns=['order'])
+        edited_rev = st.data_editor(
+            st.session_state.calc_data[['No', '区画名', '適用上限(m3)', '基本料金(入力)']],
+            column_config={
+                "No": st.column_config.NumberColumn(
+                    label="🔒 No", 
+                    disabled=True, 
+                    width=60
+                ),
+                "区画名": st.column_config.TextColumn(
+                    label="🔒 区画", 
+                    disabled=True, 
+                    width=80
+                ),
+                "適用上限(m3)": st.column_config.NumberColumn(
+                    label="✏️ 適用上限 (変更可)", 
+                    format="%.1f",
+                    required=True
+                ),
+                "基本料金(入力)": st.column_config.NumberColumn(
+                    label="✏️ 基本料金 (目標)", 
+                    help="設定したい基本料金を入力してください", 
+                    format="%.2f",
+                    required=True
+                )
+            },
+            num_rows="dynamic",
+            use_container_width=True,
+            key="editor_rev"
+        )
 
-            # --- 表示 (単一状態と同一デザイン) ---
-            st.markdown("---")
-            total_count = agg_df['調定数'].sum()
-            total_vol = agg_df['使用量'].sum()
-            
-            c1, c2, c3 = st.columns(3)
-            c1.metric("合計調定数", f"{total_count:,.0f}")
-            c2.metric("合計使用量", f"{total_vol:,.0f} m³")
-            if total_count > 0: c3.metric("1件あたり平均", f"{total_vol/total_count:.1f} m³")
+    with c2:
+        st.markdown("##### 2. 計算結果 (Result)")
+        if not edited_rev.empty:
+            calc_df_rev = edited_rev.copy()
+            calc_df_rev['基本料金(入力)'] = pd.to_numeric(calc_df_rev['基本料金(入力)'], errors='coerce').fillna(0)
+            calc_df_rev['適用上限(m3)'] = pd.to_numeric(calc_df_rev['適用上限(m3)'], errors='coerce').fillna(0)
 
-            chic_colors = ['#88a0b9', '#aab7b8', '#82e0aa', '#f5b7b1', '#d7bde2', '#f9e79f']
-            g1, g2 = st.columns(2)
-            with g1:
-                st.plotly_chart(px.pie(agg_df, values='調定数', names='Current_Tier', hole=0.5, color_discrete_sequence=chic_colors, title="調定数シェア"), use_container_width=True)
-            with g2:
-                st.plotly_chart(px.pie(agg_df, values='使用量', names='Current_Tier', hole=0.5, color_discrete_sequence=chic_colors, title="使用量シェア"), use_container_width=True)
-
-            agg_df['調定数構成比'] = (agg_df['調定数'] / total_count * 100).map('{:.1f}%'.format)
-            agg_df['使用量構成比'] = (agg_df['使用量'] / total_vol * 100).map('{:.1f}%'.format)
-            st.dataframe(agg_df[['Current_Tier', '調定数', '調定数構成比', '使用量', '使用量構成比']], hide_index=True, use_container_width=True)
-else:
-    st.info("👈 CSVを読み込んでください。")
+            res_units = solve_unit(calc_df_rev, base_a_rev, unit_a_rev)
+            
+            res_list = []
+            for idx, row in calc_df_rev.sort_values('No').iterrows():
+                no = row['No']
+                base_val = base_a_rev if no == 1 else row['基本料金(入力)']
+                
+                res_list.append({
+                    "No": no,
+                    "区画": row['区画名'],
+                    "適用上限": row['適用上限(m3)'],
+                    "基本料金": base_val,
+                    "単位料金 (算出)": res_units.get(no, 0)
+                })
+            
+            # 色付け廃止、シンプル表示
+            st.dataframe(
+                pd.DataFrame(res_list).set_index('No').style.format({
+                    "適用上限": "{:,.1f}",
+                    "基本料金": "{:,.2f}", 
+                    "単位料金 (算出)": "{:,.4f}"
+                }), 
+                use_container_width=True,
+                height=400
+            )
+            
+            st.info("💡 計算された「単位料金」がマイナスの場合は、基本料金の傾斜がきつすぎます。")
