@@ -17,8 +17,8 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.markdown('<div class="main-title"><span style="color:#2c3e50">Gas</span><span style="color:#e74c3c">i</span><span style="color:#3498db">o</span> mini</div>', unsafe_allow_html=True)
-st.markdown('<div class="sub-title">Current Status Visualizer (Consistent Structure Mode)</div>', unsafe_allow_html=True)
+st.markdown('<div class="main-title">Gasio mini</div>', unsafe_allow_html=True)
+st.markdown('<div class="sub-title">Multi-Tariff Consistent Visualizer</div>', unsafe_allow_html=True)
 
 # ---------------------------------------------------------
 # 2. 関数定義
@@ -27,10 +27,8 @@ def normalize_columns(df):
     rename_map = {
         '基本': '基本料金', '基礎料金': '基本料金', 'Base': '基本料金',
         '単位': '単位料金', '単価': '単位料金', '従量料金': '単位料金',
-        '上限': 'MAX', '適用上限': 'MAX', 'max': 'MAX',
-        '下限': 'MIN', '適用下限': 'MIN', 'min': 'MIN',
-        'ID': '料金表番号', 'Code': '料金表番号', 'code': '料金表番号',
-        'Usage': '使用量', 'usage': '使用量', 'Vol': '使用量', 'Volume': '使用量',
+        '上限': 'MAX', '下限': 'MIN', 'ID': '料金表番号',
+        'Usage': '使用量', 'usage': '使用量', 'Vol': '使用量',
         '調定': '調定数', 'BillingCount': '調定数', '取付': '取付数'
     }
     df = df.rename(columns=rename_map)
@@ -48,24 +46,23 @@ def smart_load(file):
         except: continue
     return None
 
-def get_tier_name(usage, tariff_df):
-    if tariff_df.empty: return "Unknown"
-    sorted_df = tariff_df.sort_values('MAX').reset_index(drop=True)
-    # 浮動小数点の誤差を考慮し微小値を加算
-    applicable = sorted_df[sorted_df['MAX'] >= (usage - 1e-9)]
-    row = applicable.iloc[0] if not applicable.empty else sorted_df.iloc[-1]
+# 【修正】ラベルを境界値で固定し、並び順を保証する
+def get_unified_label(usage, sorted_master):
+    if sorted_master.empty: return "Unknown"
+    applicable = sorted_master[sorted_master['MAX'] >= (usage - 1e-9)]
+    row = applicable.iloc[0] if not applicable.empty else sorted_master.iloc[-1]
     
-    if '区画名' in row and pd.notna(row['区画名']): return str(row['区画名'])
-    rank = row.name + 1
-    return f"Tier {rank}"
+    # 境界値を名前にすることで、IDが違っても同一視させる
+    min_val = row['MIN'] if 'MIN' in row else 0
+    return f"{min_val:g} - {row['MAX']:g} m³"
 
 # ---------------------------------------------------------
 # 3. メイン処理
 # ---------------------------------------------------------
 with st.sidebar:
     st.header("📂 Data Import")
-    file_usage = st.file_uploader("1. 使用量CSV (実績)", type=['csv'])
-    file_master = st.file_uploader("2. 料金表マスタCSV (定義)", type=['csv'])
+    file_usage = st.file_uploader("1. 使用量CSV", type=['csv'])
+    file_master = st.file_uploader("2. 料金表マスタCSV", type=['csv'])
 
 if file_usage and file_master:
     df_usage = smart_load(file_usage)
@@ -73,44 +70,37 @@ if file_usage and file_master:
     
     if df_usage is not None and df_master is not None:
         usage_ids = sorted(df_usage['料金表番号'].unique())
-        
-        # Q: どの料金表を合算するか？ (マルチセレクトに変更)
-        selected_ids = st.multiselect("分析対象の料金表番号を選択 (複数選択で合算判定を行います)", usage_ids, default=usage_ids[:1])
-        
+        selected_ids = st.multiselect("分析対象の料金表番号を選択", usage_ids, default=usage_ids[:1])
+
         if not selected_ids:
-            st.info("分析するIDを選択してください。")
             st.stop()
 
-        # --- 構造一致チェック ---
-        # 各IDのMAX値のセットを比較する
-        structure_check = {}
-        for tid in selected_ids:
-            m_sub = df_master[df_master['料金表番号'] == tid]
-            if not m_sub.empty:
-                # MAX値をソートしたタプルを「構造の指紋」とする
-                fingerprint = tuple(sorted(m_sub['MAX'].unique()))
-                structure_check[tid] = fingerprint
-        
-        unique_structures = set(structure_check.values())
-        
-        if len(unique_structures) > 1:
-            st.error("⚠️ 選択された料金表間で「区画の境界(MAX値)」が一致しません。合算分析は不可能です。")
-            st.write("各IDの境界設定:", structure_check)
+        # --- 構造チェック (指紋判定) ---
+        structures = {tid: tuple(sorted(df_master[df_master['料金表番号'] == tid]['MAX'].unique())) for tid in selected_ids}
+        if len(set(structures.values())) > 1:
+            st.error("⚠️ 境界線が不一致です。")
             st.stop()
-        
+
         # --- 分析実行 ---
         df_target = df_usage[df_usage['料金表番号'].isin(selected_ids)].copy()
-        # 代表として最初のIDのマスタを使用
-        master_rep = df_master[df_master['料金表番号'] == selected_ids[0]].copy()
+        # 代表マスタ
+        master_rep = df_master[df_master['料金表番号'] == selected_ids[0]].sort_values('MAX').reset_index(drop=True)
         
-        df_target['Current_Tier'] = df_target['使用量'].apply(lambda x: get_tier_name(x, master_rep))
+        # 統一ラベルの付与
+        df_target['Unified_Tier'] = df_target['使用量'].apply(lambda x: get_unified_label(x, master_rep))
         
-        agg_df = df_target.groupby('Current_Tier').agg(
+        # 集計
+        agg_df = df_target.groupby('Unified_Tier').agg(
             調定数=('調定数', 'sum'),
             総使用量=('使用量', 'sum')
-        ).reset_index().sort_values('Current_Tier')
+        ).reset_index()
 
-        # 可視化
+        # 【重要】並び順をMAX値の昇順に強制ソート
+        tier_order = {get_unified_label(r['MAX']-1e-6, master_rep): i for i, r in master_rep.iterrows()}
+        agg_df['order'] = agg_df['Unified_Tier'].map(tier_order)
+        agg_df = agg_df.sort_values('order').drop(columns=['order'])
+
+        # --- 可視化 ---
         st.markdown("---")
         total_count = agg_df['調定数'].sum()
         total_vol = agg_df['総使用量'].sum()
@@ -118,32 +108,23 @@ if file_usage and file_master:
         m1, m2, m3 = st.columns(3)
         m1.metric("合計調定数", f"{total_count:,}")
         m2.metric("合計使用量", f"{total_vol:,.0f} m³")
-        if total_count > 0:
-            m3.metric("1件あたり平均", f"{total_vol/total_count:.1f} m³")
+        if total_count > 0: m3.metric("1件あたり平均", f"{total_vol/total_count:.1f} m³")
 
-        chic_colors = ['#88a0b9', '#aab7b8', '#82e0aa', '#f5b7b1', '#d7bde2', '#f9e79f']
+        chic_colors = ['#88a0b9', '#82e0aa', '#f5b7b1', '#d7bde2', '#f9e79f', '#aab7b8']
         g1, g2 = st.columns(2)
-        
-        # グラフ描画
         with g1:
-            st.markdown("**調定数シェア**")
-            fig1 = px.pie(agg_df, values='調定数', names='Current_Tier', hole=0.5, color_discrete_sequence=chic_colors)
-            fig1.update_traces(textinfo='percent+label')
+            st.write("**調定数シェア**")
+            fig1 = px.pie(agg_df, values='調定数', names='Unified_Tier', hole=0.5, color_discrete_sequence=chic_colors, sort=False)
             st.plotly_chart(fig1, use_container_width=True)
-            
         with g2:
-            st.markdown("**使用量シェア**")
-            fig2 = px.pie(agg_df, values='総使用量', names='Current_Tier', hole=0.5, color_discrete_sequence=chic_colors)
-            fig2.update_traces(textinfo='percent+label')
+            st.write("**使用量シェア**")
+            fig2 = px.pie(agg_df, values='総使用量', names='Unified_Tier', hole=0.5, color_discrete_sequence=chic_colors, sort=False)
             st.plotly_chart(fig2, use_container_width=True)
 
-        # 構成比計算
-        if total_count > 0:
-            agg_df['調定数構成比'] = (agg_df['調定数'] / total_count * 100).map('{:.1f}%'.format)
-        if total_vol > 0:
-            agg_df['使用量構成比'] = (agg_df['総使用量'] / total_vol * 100).map('{:.1f}%'.format)
-        
-        st.markdown("**詳細データ**")
-        st.dataframe(agg_df[['Current_Tier', '調定数', '調定数構成比', '総使用量', '使用量構成比']], hide_index=True, use_container_width=True)
+        # 構成比
+        agg_df['調定数構成比'] = (agg_df['調定数'] / total_count * 100).map('{:.1f}%'.format)
+        agg_df['使用量構成比'] = (agg_df['総使用量'] / total_vol * 100).map('{:.1f}%'.format)
+        st.dataframe(agg_df[['Unified_Tier', '調定数', '調定数構成比', '総使用量', '使用量構成比']], hide_index=True, use_container_width=True)
+
 else:
     st.info("👈 サイドバーからCSVをアップロードしてください。")
