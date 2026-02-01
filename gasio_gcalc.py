@@ -1,74 +1,54 @@
 import streamlit as st
 import pandas as pd
 
-# ---------------------------------------------------------
-# 1. 初期設定
-# ---------------------------------------------------------
 st.set_page_config(page_title="G-Calc PoC", layout="wide")
-st.title("🛡️ G-Calc パイロットテスト：労務費ハイブリッド算定")
+st.title("🛡️ G-Calc パイロットテスト：自動サーチ・エンジン")
 
-# ファイル名（GitHub上のExcelファイル名と一致させる）
 EXCEL_FILE = "G-Calc_master.xlsx"
 
 @st.cache_data
-def load_excel_data():
+def load_gcalc_val(keyword):
     try:
-        # Excelの「ナビ」シートから基本情報を読み込み
-        df_nav = pd.read_excel(EXCEL_FILE, sheet_name='ナビ', header=None)
-        # B13セル（12行目、1列目）あたりに地点数があると仮定
-        # ※実際の座標に合わせて微調整が必要
-        cust_count = df_nav.iloc[12, 4] 
-        return float(cust_count)
+        # Excelの「ナビ」シートを読み込み
+        df = pd.read_excel(EXCEL_FILE, sheet_name='ナビ', header=None)
+        
+        # 全セルをスキャンしてキーワードを探す
+        for i, row in df.iterrows():
+            for j, val in enumerate(row):
+                if str(val).strip() == keyword:
+                    # キーワードの1つ右、または2つ右のセルに数値があると仮定
+                    # 今回の「ナビ」シートの構造に合わせて「1つ右(j+1)」を取得
+                    found_val = df.iloc[i, j+1]
+                    return float(found_val)
+        return None
     except Exception as e:
-        st.error(f"Excel読み込み失敗：{e}")
-        return 245.0 # エラー時のデフォルト値
+        st.error(f"サーチ失敗：{e}")
+        return None
 
 # ---------------------------------------------------------
-# 2. 入力セクション
+# 実行
 # ---------------------------------------------------------
-st.header("🎮 算定シミュレーター")
-base_cust_count = load_excel_data()
+st.header("🎮 算定パラメータ・スキャン")
 
-col1, col2 = st.columns(2)
+# 「許可地点数*」をキーワードに検索
+scanned_count = load_gcalc_val("許可地点数*")
 
-with col1:
-    st.subheader("📝 入力パラメータ")
-    customer_count = st.number_input("供給地点数 (Excelから取得)", value=base_cust_count)
-    std_coeff = 0.0031  # 本来は標準係数シートから取得
-    avg_wage = 7104000  # 本来は労務費シートから取得
+if scanned_count is not None:
+    st.success(f"✅ Excelから値を救出したぞ！ 座標自動検知完了。")
+    customer_count = st.number_input("供給地点数 (自動取得値)", value=scanned_count)
+else:
+    st.warning("⚠️ キーワードが見つからない。手入力してくれ。")
+    customer_count = st.number_input("供給地点数 (手入力)", value=245.0)
 
-    st.divider()
-    # 【重要】ハイブリッド入力の切り替え
-    calc_mode = st.radio("労務費の採用ロジック", ["理論計算値（標準係数）", "実績値（手入力）"])
-    
-    if calc_mode == "実績値（手入力）":
-        manual_labor_cost = st.number_input("実績労務費を入力してください (円)", value=5500000)
-    else:
-        # 理論値の計算
-        theory_labor_cost = customer_count * std_coeff * avg_wage
-        st.info(f"計算式: {customer_count}地点 × {std_coeff} × {avg_wage:,.0f}円")
+# 簡易計算テスト
+std_coeff = 0.0031
+avg_wage = 7104000
+theory_cost = customer_count * std_coeff * avg_wage
 
-with col2:
-    st.subheader("💡 算定結果・根拠")
-    
-    if calc_mode == "実績値（手入力）":
-        final_cost = manual_labor_cost
-        st.warning("⚠️ 現在【実績値】を採用しています。")
-    else:
-        final_cost = theory_labor_cost
-        st.success("✅ 現在【理論計算値】を採用しています。")
-
-    st.metric("採用される労務費", f"{final_cost:,.0f} 円")
-
-# ---------------------------------------------------------
-# 3. ロジック公開モード
-# ---------------------------------------------------------
 st.divider()
-if st.checkbox("📖 ロジック公開モード（役所審査・教育用）"):
-    st.markdown("### 労務費算定の根拠")
-    if calc_mode == "理論計算値（標準係数）":
-        st.write("本数値は、ガス事業許可申請等に基づく標準係数を用いて算出されています。")
-        st.latex(r"Cost = \text{地点数} \times \text{標準係数} \times \text{平均賃金}")
-    else:
-        st.write("本数値は、直近3年間の決算実績平均に基づき、実態に即して算定されています。")
-        st.info("根拠資料：2023-2025年度 決算報告書 労務費明細参照")
+st.metric("算定された労務費 (理論値)", f"{theory_cost:,.0f} 円")
+
+if st.checkbox("📖 内部構造を表示（デバッグ用）"):
+    st.write("現在、PythonはこのようにExcelを認識しているぞ：")
+    df_debug = pd.read_excel(EXCEL_FILE, sheet_name='ナビ', header=None)
+    st.dataframe(df_debug.head(15))
