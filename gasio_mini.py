@@ -4,21 +4,21 @@ import plotly.express as px
 import numpy as np
 
 # ---------------------------------------------------------
-# 1. 設定 & デザイン
+# 1. 設定 & デザイン (ロゴ拡大 & 左寄せ)
 # ---------------------------------------------------------
 st.set_page_config(page_title="Gasio mini", page_icon="🔥", layout="wide")
 
 st.markdown("""
     <style>
     .block-container { padding-top: 2rem; }
-    .main-title { font-size: 3rem; font-weight: 800; color: #2c3e50; text-align: left; margin-bottom: 0; }
+    .main-title { font-size: 3rem; font-weight: 800; color: #2c3e50; text-align: left; margin-bottom: 0; letter-spacing: -1px; }
     .sub-title { font-size: 1.2rem; color: #7f8c8d; text-align: left; border-bottom: 2px solid #3498db; padding-bottom: 10px; margin-bottom: 20px;}
     .stMetric { background-color: #f8f9fa; border-radius: 5px; padding: 10px; border-left: 4px solid #3498db; }
     </style>
 """, unsafe_allow_html=True)
 
-st.markdown('<div class="main-title">Gasio mini</div>', unsafe_allow_html=True)
-st.markdown('<div class="sub-title">Multi-Tariff Consistent Visualizer</div>', unsafe_allow_html=True)
+st.markdown('<div class="main-title"><span style="color:#2c3e50">Gas</span><span style="color:#e74c3c">i</span><span style="color:#3498db">o</span> mini</div>', unsafe_allow_html=True)
+st.markdown('<div class="sub-title">Current Status Visualizer</div>', unsafe_allow_html=True)
 
 # ---------------------------------------------------------
 # 2. 関数定義
@@ -27,18 +27,14 @@ def normalize_columns(df):
     rename_map = {
         '基本': '基本料金', '基礎料金': '基本料金', 'Base': '基本料金',
         '単位': '単位料金', '単価': '単位料金', '従量料金': '単位料金',
-        '上限': 'MAX', '適用上限': 'MAX', 'max': 'MAX',
-        '下限': 'MIN', '適用下限': 'MIN', 'min': 'MIN',
-        'ID': '料金表番号', 'Code': '料金表番号', 'code': '料金表番号',
+        '上限': 'MAX', '下限': 'MIN',
+        'ID': '料金表番号', 'Code': '料金表番号',
         'Usage': '使用量', 'usage': '使用量', 'Vol': '使用量',
-        '調定': '調定数', 'BillingCount': '調定数', '取付': '取付数'
+        '調定': '調定数', '取付': '取付数'
     }
     df = df.rename(columns=rename_map)
     if '料金表番号' not in df.columns: df['料金表番号'] = 10
     if '調定数' not in df.columns: df['調定数'] = 1
-    # 数値化の強制
-    if '使用量' in df.columns: df['使用量'] = pd.to_numeric(df['使用量'], errors='coerce').fillna(0)
-    if '調定数' in df.columns: df['調定数'] = pd.to_numeric(df['調定数'], errors='coerce').fillna(0)
     return df
 
 def smart_load(file):
@@ -51,16 +47,18 @@ def smart_load(file):
         except: continue
     return None
 
-def get_unified_label(usage, sorted_master):
-    if sorted_master.empty: return "Unknown"
-    # 浮動小数点の誤差を考慮
-    applicable = sorted_master[sorted_master['MAX'] >= (usage - 1e-9)]
-    row = applicable.iloc[0] if not applicable.empty else sorted_master.iloc[-1]
-    min_val = row['MIN'] if 'MIN' in row else 0
-    return f"{min_val:g} - {row['MAX']:g} m³"
+def get_tier_name(usage, tariff_df):
+    if tariff_df.empty: return "Unknown"
+    sorted_df = tariff_df.sort_values('MAX').reset_index(drop=True)
+    applicable = sorted_df[sorted_master['MAX'] >= usage]
+    row = applicable.iloc[0] if not applicable.empty else sorted_df.iloc[-1]
+    
+    if '区画名' in row and pd.notna(row['区画名']): return str(row['区画名'])
+    rank = row.name + 1
+    return f"Tier {rank}"
 
 # ---------------------------------------------------------
-# 3. メイン処理
+# 3. メイン
 # ---------------------------------------------------------
 with st.sidebar:
     st.header("📂 Data Import")
@@ -73,65 +71,18 @@ if file_usage and file_master:
     
     if df_usage is not None and df_master is not None:
         usage_ids = sorted(df_usage['料金表番号'].unique())
-        selected_ids = st.multiselect("分析対象の料金表番号を選択", usage_ids, default=usage_ids[:1])
-
-        if not selected_ids:
-            st.stop()
-
-        # 構造チェック (境界の指紋判定)
-        structures = {tid: tuple(sorted(df_master[df_master['料金表番号'] == tid]['MAX'].unique())) for tid in selected_ids}
-        if len(set(structures.values())) > 1:
-            st.error("⚠️ 境界線が不一致です。個別に選択してください。")
-            st.stop()
-
-        # 分析実行
-        df_target = df_usage[df_usage['料金表番号'].isin(selected_ids)].copy()
-        master_rep = df_master[df_master['料金表番号'] == selected_ids[0]].sort_values('MAX').reset_index(drop=True)
+        # 最初は「単一選択」のままでリセットする
+        target_id = st.selectbox("分析するID", usage_ids)
         
-        df_target['Unified_Tier'] = df_target['使用量'].apply(lambda x: get_unified_label(x, master_rep))
+        df_target = df_usage[df_usage['料金表番号'] == target_id].copy()
+        master_target = df_master[df_master['料金表番号'] == target_id].copy()
         
-        agg_df = df_target.groupby('Unified_Tier').agg(
-            調定数=('調定数', 'sum'),
-            総使用量=('使用量', 'sum')
-        ).reset_index()
-
-        # ソート順序
-        tier_order = {get_unified_label(r['MAX']-1e-6, master_rep): i for i, r in master_rep.iterrows()}
-        agg_df['order'] = agg_df['Unified_Tier'].map(tier_order)
-        agg_df = agg_df.sort_values('order').drop(columns=['order'])
-
-        # --- 表示 ---
-        st.markdown("---")
-        total_count = agg_df['調定数'].sum()
-        total_vol = agg_df['総使用量'].sum()
+        # 判定
+        df_target['Current_Tier'] = df_target['使用量'].apply(lambda x: get_tier_name(x, master_target) if master_target is not None else "Unknown")
         
-        m1, m2, m3 = st.columns(3)
-        m1.metric("合計調定数", f"{total_count:,.0f}")
-        m2.metric("合計使用量", f"{total_vol:,.1f} m³")
-        if total_count > 0: m3.metric("1件あたり平均", f"{total_vol/total_count:.2f} m³")
+        # 集計
+        agg_df = df_target.groupby('Current_Tier').agg({'調定数': 'sum', '使用量': 'sum'}).reset_index()
 
-        # 【鉄壁のガード】データが1件以上あり、かつ合計が0より大きい場合のみグラフを描画
-        if not agg_df.empty and total_count > 0:
-            g1, g2 = st.columns(2)
-            chic_colors = ['#88a0b9', '#82e0aa', '#f5b7b1', '#d7bde2', '#f9e79f', '#aab7b8']
-            with g1:
-                st.write("**調定数シェア**")
-                fig1 = px.pie(agg_df, values='調定数', names='Unified_Tier', hole=0.5, color_discrete_sequence=chic_colors, sort=False)
-                st.plotly_chart(fig1, use_container_width=True)
-            with g2:
-                st.write("**使用量シェア**")
-                if total_vol > 0:
-                    fig2 = px.pie(agg_df, values='総使用量', names='Unified_Tier', hole=0.5, color_discrete_sequence=chic_colors, sort=False)
-                    st.plotly_chart(fig2, use_container_width=True)
-                else:
-                    st.info("使用量が0のためシェア表示不可")
-
-            # テーブル表示
-            agg_df['調定数構成比'] = (agg_df['調定数'] / total_count * 100).map('{:.1f}%'.format)
-            agg_df['使用量構成比'] = (agg_df['総使用量'] / (total_vol if total_vol > 0 else 1) * 100).map('{:.1f}%'.format)
-            st.dataframe(agg_df[['Unified_Tier', '調定数', '調定数構成比', '総使用量', '使用量構成比']], hide_index=True, use_container_width=True)
-        else:
-            st.warning("表示できる集計データがありません。")
-
+        st.dataframe(agg_df)
 else:
-    st.info("👈 サイドバーからCSVをアップロードしてください。")
+    st.info("👈 CSVをアップロードしてください。")
