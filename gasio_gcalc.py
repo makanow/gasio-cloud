@@ -2,67 +2,56 @@ import streamlit as st
 import pandas as pd
 import math
 
-st.set_page_config(page_title="Gas Lab Engine : Final Stability", layout="wide")
+st.set_page_config(page_title="Gas Lab Engine : Final Recovery", layout="wide")
 
-# 初期化
+# 初期化（聖数 30,715,365 への器）
 if 'db' not in st.session_state:
-    st.session_state.db = {k: 0.0 for k in ["res_land_invest", "res_land_area", "res_land_eval"]}
+    st.session_state.db = {k: 0.0 for k in ["res_land_invest", "res_land_area", "res_land_eval", "invest_1", "invest_2"]}
 db = st.session_state.db
 
-def clean_num(val):
+def try_float(val):
     try:
         if pd.isna(val): return None
-        # 文字列としてカンマ等を除去
-        s = str(val).replace(',', '').replace('㎡', '').replace('円', '').strip()
-        num = float(s)
-        return num
+        return float(str(val).replace(',', '').replace('㎡', '').replace('円', '').strip())
     except: return None
 
-st.title("🧪 Gas Lab Engine : Land Calc Verified")
+st.title("🧪 Gas Lab Engine : Auto Discovery Mode")
 
-uploaded_file = st.file_uploader("G-Calc_master.xlsx をアップロード", type=["xlsx"])
+# クラウドが無理と言われないための「確実な搬入口」
+uploaded_file = st.file_uploader("G-Calc_master.xlsx をアップロード（ドラッグ＆ドロップ）", type=["xlsx"])
 
 if uploaded_file:
-    try:
-        sheets = pd.read_excel(uploaded_file, sheet_name=None)
-        land_sheet = next((s for s in sheets.keys() if "土地" in s), None)
-        
-        if land_sheet:
-            df_l = sheets[land_sheet]
-            valid_row = None
-            
-            # 数値が入っている「かつ」面積が0より大きい行を探す
-            for i in range(len(df_l)):
-                area_val = clean_num(df_l.iloc[i, 0])
-                price_val = clean_num(df_l.iloc[i, 1])
-                # 面積がNoneでなく、かつ0より大きいことを厳格にチェック
-                if area_val is not None and area_val > 0:
-                    if price_val is not None:
-                        valid_row = i
+    sheets = pd.read_excel(uploaded_file, sheet_name=None)
+    
+    # 【全自動スキャン】「土地」と「資産」の場所を総当たりで探す
+    for s_name, df in sheets.items():
+        # A. 土地データの探索
+        if "土地" in s_name:
+            for r in range(len(df)):
+                for c in range(len(df.columns) - 1):
+                    v_area = try_float(df.iloc[r, c])
+                    v_price = try_float(df.iloc[r, c+1])
+                    if v_area and v_area > 0 and v_price and v_price > 0:
+                        db["res_land_area"] = min(v_area, 295.0)
+                        db["res_land_invest"] = round(v_price / v_area, 0) * db["res_land_area"]
+                        st.sidebar.success(f"土地発見: {s_name} [{r+2}行, {c+1}列]")
                         break
-            
-            if valid_row is not None:
-                act_area = clean_num(df_l.iloc[valid_row, 0])
-                act_price = clean_num(df_l.iloc[valid_row, 1])
-                act_eval = clean_num(df_l.iloc[valid_row, 2]) or 0.0
-                
-                # 計算実行（act_area > 0 が保証されているので安全）
-                db["res_land_area"] = min(act_area, 295.0)
-                unit_p = round(act_price / act_area, 0)
-                db["res_land_invest"] = unit_p * db["res_land_area"]
-                
-                unit_e = round(act_eval / act_area, 0)
-                db["res_land_eval"] = unit_e * db["res_land_area"]
-                
-                st.success(f"✅ シート '{land_sheet}' の {valid_row + 1} 行目を正常に解析しました。")
-            else:
-                st.error("❌ 面積が 0 より大きい有効なデータ行が見つかりません。")
-    except Exception as e:
-        st.error(f"予期せぬエラー: {e}")
+        
+        # B. 償却資産データの探索（I列=減免, K列=取得価額）
+        if "資産" in s_name or "2_a" in s_name:
+            # 11列目(K列)に数値があり、9列目(I列)にフラグがある場所を探す
+            try:
+                # 文字列を排除して数値化
+                prices = df.iloc[:, 10].apply(try_float).fillna(0)
+                is_red = df.iloc[:, 8].apply(try_float).fillna(0)
+                db["invest_2"] = prices[is_red == 1].sum()
+                db["invest_1"] = prices[is_red != 1].sum() + db["res_land_invest"]
+                st.sidebar.success(f"資産発見: {s_name}")
+            except: continue
 
-# Dashboard
-st.header("📊 土地算定 Dashboard")
+# --- Dashboard ---
+st.header("📊 算定 Dashboard (自動検知)")
 c1, c2, c3 = st.columns(3)
-c1.metric("認容面積", f"{db['res_land_area']} m2")
-c2.metric("認容投資額", f"¥{db['res_land_invest']:,.0f}")
-c3.metric("認容評価額", f"¥{db['res_land_eval']:,.0f}")
+c1.metric("認容土地投資額", f"¥{db['res_land_invest']:,.0f}")
+c2.metric("投資額① (通常)", f"¥{db['invest_1']:,.0f}")
+c3.metric("投資額② (減免)", f"¥{db['invest_2']:,.0f}")
