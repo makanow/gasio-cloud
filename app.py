@@ -18,11 +18,9 @@ st.markdown("""
     .main-title { font-size: 3rem; font-weight: 800; color: #2c3e50; margin-bottom: 0px; letter-spacing: -1px; }
     .sub-title { font-size: 1.2rem; color: #7f8c8d; margin-top: -5px; margin-bottom: 20px; border-bottom: 2px solid #3498db; padding-bottom: 10px; }
     
-    /* メトリクス見切れ防止 */
     [data-testid="stMetricValue"] { font-size: 1.3rem !important; overflow-wrap: break-word; }
     [data-testid="stMetricLabel"] { font-size: 0.8rem !important; }
 
-    /* イエローペン・スタイル：編集可能セルの右端に黄色のアクセント */
     [data-testid="stDataEditor"] div[data-testid="stTable"] td[aria-readonly="false"] {
         border-right: 5px solid #fdd835 !important;
         background-color: #fffde7 !important;
@@ -44,18 +42,18 @@ with c_head1:
     st.markdown('<div class="main-title"><span style="color:#2c3e50">Gas</span><span style="color:#e74c3c">i</span><span style="color:#3498db">o</span> 計算機</div>', unsafe_allow_html=True)
     st.markdown('<div class="sub-title">Cloud Edition - Rate Simulation System</div>', unsafe_allow_html=True)
 
-# --- ステート管理 ---
+# --- ステート管理 (ここを3プランに修正) ---
 if 'simulation_result' not in st.session_state: st.session_state.simulation_result = None
 if 'plan_data' not in st.session_state:
     d_df = pd.DataFrame({'No': [1, 2, 3], '区画名': ['A', 'B', 'C'], '適用上限(m3)': [8.0, 30.0, 99999.0], '単位料金': [500.0, 400.0, 300.0]})
-    st.session_state.plan_data = {i: d_df.copy() for i in range(5)}
-    st.session_state.base_a = {i: 1500.0 for i in range(5)}
+    st.session_state.plan_data = {i: d_df.copy() for i in range(3)} # 5 -> 3
+    st.session_state.base_a = {i: 1500.0 for i in range(3)} # 5 -> 3
 
 CHIC_PIE_COLORS = ['#88a0b9', '#aab7b8', '#82e0aa', '#f5b7b1', '#d7bde2', '#f9e79f']
 COLOR_BAR, COLOR_CURRENT, COLOR_NEW = '#34495e', '#95a5a6', '#e67e22'
 
 # ---------------------------------------------------------
-# 2. 関数定義 (実務ロジック完全復旧)
+# 2. 関数定義 (実務ロジック維持)
 # ---------------------------------------------------------
 def normalize_columns(df):
     rename_map = {'基本':'基本料金','基礎料金':'基本料金','Base':'基本料金','上限':'MAX','適用上限':'MAX','ID':'料金表番号','Usage':'使用量','調定':'調定数'}
@@ -171,7 +169,7 @@ if file_usage and file_master and selected_ids:
 
     with tab_design:
         st.markdown("##### 料金プラン設計")
-        plan_tabs = st.tabs([f"Plan {i+1}" for i in range(5)])
+        plan_tabs = st.tabs([f"Plan {i+1}" for i in range(3)]) # 5 -> 3
         new_plans = {}
         for i, pt in enumerate(plan_tabs):
             with pt:
@@ -201,7 +199,7 @@ if file_usage and file_master and selected_ids:
 
     with tab_sim:
         st.markdown("##### 収支影響シミュレーション")
-        if st.button("🚀 計算実行", type="primary"):
+        if st.button("🚀 計算実行", key="calc_run", type="primary"):
             with st.spinner("Calculating..."):
                 res = df_target_usage.copy()
                 res['現行料金'] = res.apply(lambda r: calculate_bill_single(r['使用量'], df_master_all[df_master_all['料金表番号']==r['料金表番号']], r['調定数']), axis=1)
@@ -231,7 +229,7 @@ if file_usage and file_master and selected_ids:
     with tab_analysis:
         st.markdown("##### 需要構成分析")
         sel_p = st.selectbox("比較対象", list(new_plans.keys()), key="s_p_a")
-        # 混在自動検知ロジック
+        # 混在自動検知ロジック (維持)
         fps = {tid: tuple(sorted(df_master_all[df_master_all['料金表番号']==tid]['MAX'].unique())) for tid in selected_ids}
         for tid in fps: 
             l = list(fps[tid]); l[-1] = 999999999.0; fps[tid] = tuple(l)
@@ -247,7 +245,7 @@ if file_usage and file_master and selected_ids:
                 st.plotly_chart(px.pie(agg_c, values='件数', names='現行区画', hole=0.5, color_discrete_sequence=CHIC_PIE_COLORS), use_container_width=True)
                 st.dataframe(agg_c.style.format({"使用量":"{:,.1f}"}), hide_index=True, use_container_width=True)
             else:
-                st.info("⚠️ 異なる区画の料金表が混在しているため、分布図を表示")
+                st.info("⚠️ 複数料金合算のためヒストグラムを表示")
                 st.plotly_chart(px.histogram(df_target_usage, x="使用量", color="料金表番号", nbins=50, color_discrete_sequence=CHIC_PIE_COLORS), use_container_width=True)
         with g2:
             st.markdown(f"**Proposal: {sel_p}構成**")
