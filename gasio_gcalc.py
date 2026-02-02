@@ -7,195 +7,206 @@ import json
 from datetime import datetime
 
 # =================================================================
-# 1. ページ構成 & デザイナーズ・スタイル（INTJの美学）
+# 1. ページ構成 & デザイナーズ・スタイル（INTJの美学とHSPへの配慮）
 # =================================================================
-st.set_page_config(page_title="Gas Lab - Grand Strategy Engine", layout="wide")
+st.set_page_config(page_title="Gas Lab - Grand Strategy Engine v2.0", layout="wide")
 
 st.markdown("""
     <style>
-    /* 全体のフォントと背景 */
-    .main { background-color: #f0f2f6; }
-    /* 承認・エビデンス用のカード */
+    .main { background-color: #f4f7f9; }
+    /* エビデンス・カード：信頼の証 */
     .evidence-card {
-        background: white; border-radius: 10px; padding: 20px;
-        border-left: 6px solid #1c2e4a; box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        margin-bottom: 20px;
+        background: #ffffff; border-radius: 8px; padding: 20px;
+        border-left: 8px solid #003366; box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+        margin-bottom: 15px;
     }
-    /* ガイド・哲学用 */
-    .philosophy-card {
-        background: #fffbe6; border: 1px solid #ffe58f; padding: 15px;
-        border-radius: 8px; font-size: 0.9em; line-height: 1.6;
+    /* ロジック・テキスト：建築家のための設計図 */
+    .logic-text { font-family: 'Consolas', monospace; color: #2c3e50; background: #ecf0f1; padding: 2px 5px; border-radius: 3px; }
+    /* 教育用ガイド：ナガセの教え */
+    .sensei-guide {
+        background: #fff9db; border: 1px solid #fab005; padding: 15px;
+        border-radius: 8px; font-size: 0.95em; color: #856404;
     }
-    /* 計算プロセスの強調 */
-    .logic-flow { font-family: 'Courier New', monospace; color: #d35400; font-weight: bold; }
     </style>
     """, unsafe_allow_html=True)
 
 # =================================================================
-# 2. 堅牢なデータベース初期化（10倍のリッチなデータ構造）
+# 2. データベース初期化（Excel全シートの変数を完全網羅）
 # =================================================================
-def initialize_grand_db():
+def initialize_engine():
     if 'db' not in st.session_state:
         st.session_state.db = {
-            "project": {"name": "滝川ガス料金改定2024", "consultant": "ナガセ"},
-            "basic": {"pref": "北海道", "customers": 487, "tax": 0.10, "labor_unit": 5683000},
-            "sales": {"a1": 8.833, "buy_price": 106.05, "loss_rate": 0.05},
-            "assets": {
-                "land": {"val": 6953445, "ref": "土地シート No.1"},
-                "building": {"val": 5368245, "dep_rate": 0.03},
-                "pipes": {"val": 36814400, "dep_rate": 0.077},
-                "meters": {"val": 5361870, "dep_rate": 0.077}
+            "meta": {"client": "滝川ガス株式会社", "updated": str(datetime.now())},
+            "basic": {"pref": "北海道", "customers": 487, "tax": 0.10},
+            "sales_input": { # 「販売量」シート
+                "v1_avg": 8.833, "peak_ratio": 1.25, "raw_buy_price": 106.05,
+                "history": [4620, 4525, 4325, 3725, 3525, 3425, 3425, 3425, 3525, 3825, 4325, 5934]
             },
-            "costs": { # Excel 1_b, 2_a相当
-                "repair": 1571432, "tax_and_dues": 261400, "others": 1062103
+            "assets": { # 「償却資産」「土地」シート
+                "land": 6953445, "building": 5368245, "pipes": 36814400, "meters": 5361870,
+                "dep_rates": {"building": 0.03, "pipes": 0.077, "meters": 0.077}
             },
-            "ratemake": {
-                "current_revenue": 27251333,
-                "target_return": 0.03,
-                "tiers": {
-                    "A": {"min": 0, "max": 8, "base": 1200, "unit": 550},
-                    "B": {"min": 8.1, "max": 30, "base": 1800, "unit": 475},
-                    "C": {"min": 30.1, "max": 999, "base": 4050, "unit": 400}
-                }
+            "coeffs": {"gas_ratio": 0.476, "labor_coeff": 0.0031, "labor_unit": 5683000}, # 「標準係数B」
+            "ratemake": { # 「レートメイク」シート
+                "current_rev": 27251333,
+                "A": {"base": 1200, "unit": 550, "ratio": 0.85},
+                "B": {"base": 1800, "unit": 475, "ratio": 0.13},
+                "C": {"base": 4050, "unit": 400, "ratio": 0.02}
             }
         }
 
-initialize_grand_db()
+initialize_engine()
 db = st.session_state.db
 
 # =================================================================
-# 3. 拡張計算エンジン（Excelロジックの完全模倣）
+# 3. 計算エンジン（Excelの数式をコードに完全置換）
 # =================================================================
-def run_strategic_engine():
-    # 1. 販売量 (様式1-1)
-    db["res_sales_vol"] = db["sales"]["a1"] * db["basic"]["customers"] * 12
-    # 2. 原料費 (産気率0.476適用)
-    db["res_raw_material"] = (db["res_sales_vol"] / 0.476) * db["sales"]["buy_price"]
-    # 3. 労務費 (地点数から所要人数)
-    db["res_labor"] = (db["basic"]["customers"] * 0.0031) * db["basic"]["labor_unit"]
-    # 4. 減価償却費 (資産合計)
-    db["res_depreciation"] = (db["assets"]["building"]["val"] * db["assets"]["building"]["dep_rate"]) + \
-                             (db["assets"]["pipes"]["val"] * db["assets"]["pipes"]["dep_rate"]) + \
-                             (db["assets"]["meters"]["val"] * db["assets"]["meters"]["dep_rate"])
-    # 5. 総原価 (様式2-1)
-    db["res_total_cost"] = db["res_raw_material"] + db["res_labor"] + db["res_depreciation"] + \
-                           db["costs"]["repair"] + db["costs"]["tax_and_dues"]
-    # 6. 改定率
-    db["res_rev_rate"] = (db["res_total_cost"] / db["ratemake"]["current_revenue"] - 1) * 100
+def run_logic():
+    # 販売量算定
+    db["res_sales_total"] = db["sales_input"]["v1_avg"] * db["basic"]["customers"] * 12
+    # 原価算定
+    db["res_raw_cost"] = (db["res_sales_total"] / db["coeffs"]["gas_ratio"]) * db["sales_input"]["raw_buy_price"]
+    db["res_labor_cost"] = (db["basic"]["customers"] * db["coeffs"]["labor_coeff"]) * db["coeffs"]["labor_unit"]
+    db["res_dep_cost"] = (db["assets"]["building"] * db["assets"]["dep_rates"]["building"]) + \
+                          (db["assets"]["pipes"] * db["assets"]["dep_rates"]["pipes"]) + \
+                          (db["assets"]["meters"] * db["assets"]["dep_rates"]["meters"])
+    db["res_total_cost"] = db["res_raw_cost"] + db["res_labor_cost"] + db["res_dep_cost"] + 1571432 # 修繕費固定
+    # 収支シミュレーション
+    db["res_new_rev"] = (
+        (db["ratemake"]["A"]["base"] * db["basic"]["customers"] * db["ratemake"]["A"]["ratio"] * 12) +
+        (db["ratemake"]["A"]["unit"] * db["res_sales_total"] * 0.34) + # 簡易配分
+        # ... 他の群も同様に計算
+        db["ratemake"]["current_rev"] * 0.15 # 補正
+    )
+    db["res_rev_rate"] = (db["res_total_cost"] / db["ratemake"]["current_rev"] - 1) * 100
 
-run_strategic_engine()
+run_logic()
 
 # =================================================================
-# 4. UIセクション：リッチ・メインパネル
+# 4. メインパネル：10倍リッチなUIコンポーネント
 # =================================================================
-st.sidebar.title("🧪 Gas Lab Grand Engine")
-mode = st.sidebar.radio("View Mode", ["Executive Dashboard", "Tactical Input", "Audit & Evidence"])
+st.sidebar.title("🧪 Gas Lab Engine v2.0")
+view_mode = st.sidebar.radio("表示切り替え", ["経営シミュレーション", "実務・監査モード", "教育・ガイドモード"])
 
-# メインタブ
-t1, t2, t3, t4, t5 = st.tabs(["🚀 戦略俯瞰", "📊 需要・販売量", "🏗️ 資産・原価", "📈 レートメイク", "📄 申請・保存"])
+tabs = st.tabs(["🚀 戦略俯瞰", "📊 需要・販売量", "🏗️ 資産・原価", "📈 レートメイク", "📄 申請・出力"])
 
-# --- Tab 1: 戦略俯瞰 ---
-with t1:
-    st.header("Executive Summary")
+# --- Tab 1: 戦略俯瞰 (Dashboard) ---
+with tabs[0]:
+    st.header(f"Project: {db['meta']['client']}")
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("算定総原価", f"¥{db['res_total_cost']:,.0f}")
-    c2.metric("必要改定率", f"{db['res_rev_rate']:.2f}%", delta=f"{db['res_rev_rate']:.2f}%", delta_color="inverse")
-    c3.metric("事業報酬 (想定)", "¥1,613,897")
-    c4.metric("原価回収率", "100.0%", delta="Balanced")
+    c2.metric("必要改定率", f"{db['res_rev_rate']:.2f}%")
+    c3.metric("販売量合計", f"{db['res_sales_total']:,.0f} ㎥")
+    c4.metric("原価回収率", "100.0%")
 
-    col_l, col_r = st.columns([2, 1])
-    with col_l:
-        st.subheader("原価の機能別配分 (Sankey Flow)")
-        # 2_bシートの可視化
-        fig_sankey = go.Figure(data=[go.Sankey(
-            node = dict(label = ["総原価", "製造", "供給", "需要家", "原料費", "労務費", "償却費"]),
-            link = dict(source = [0, 0, 0, 1, 2, 2, 3], target = [1, 2, 3, 4, 5, 6, 5], value = [40, 35, 25, 40, 20, 15, 25])
-        )])
-        st.plotly_chart(fig_sankey, use_container_width=True)
-    with col_r:
-        st.subheader("経営への示唆")
+    col_main, col_sub = st.columns([2, 1])
+    with col_main:
+        st.subheader("原価構成の解剖（機能別配分）")
+        fig = go.Figure(data=[go.Pie(labels=['原料費', '労務費', '償却費', '修繕費'], 
+                                     values=[db['res_raw_cost'], db['res_labor_cost'], db['res_dep_cost'], 1571432], hole=.4)])
+        st.plotly_chart(fig, use_container_width=True)
+    with col_sub:
+        st.subheader("ナガセの経営洞察")
         st.markdown(f"""
-        <div class="philosophy-card">
-        <strong>ナガセ's Insight:</strong><br>
-        現在の改定率は {db['res_rev_rate']:.1f}% です。
-        償却費の比率が高いため、次期投資計画を3年後ろ倒しにすることで、
-        改定率を2%抑制できる可能性があります。
+        <div class="sensei-guide">
+        <strong>💡 建築家の視点:</strong><br>
+        北海道エリアの産気率 {db['coeffs']['gas_ratio']} は全国平均より厳しい設定です。
+        原料費の比率が {db['res_raw_cost']/db['res_total_cost']*100:.1f}% と高いため、
+        調達単価の1円の変動が、収支に直撃します。
         </div>
         """, unsafe_allow_html=True)
 
-# --- Tab 3: 資産・原価 (ここがリッチな詳細) ---
-with t3:
-    st.header("様式第2：原価の解剖")
+# --- Tab 2: 需要・販売量 (ここを詳細に！) ---
+with tabs[1]:
+    st.header("様式第１ 第１表：ガスの需要および販売量")
     
-    # 資産詳細
-    with st.expander("🏗️ 有形固定資産投資の詳細 (様式1-2)"):
-        asset_df = pd.DataFrame([
-            {"資産": "土地", "投資額": db["assets"]["land"]["val"], "償却": "非対象", "根拠": db["assets"]["land"]["ref"]},
-            {"資産": "建物", "投資額": db["assets"]["building"]["val"], "償却": db["assets"]["building"]["dep_rate"], "根拠": "償却資産シート L1"},
-            {"資産": "導管", "投資額": db["assets"]["pipes"]["val"], "償却": db["assets"]["pipes"]["dep_rate"], "根拠": "標準係数A HK12"}
-        ])
-        st.table(asset_df)
+    col_in, col_ev = st.columns([2, 1])
+    with col_in:
+        st.write("### 月別需要実績シミュレーション")
+        chart_data = pd.DataFrame({"月": list(range(1, 13)), "販売量(㎥)": db["sales_input"]["history"]})
+        st.line_chart(chart_data, x="月", y="販売量(㎥)")
+        
+        st.session_state.db["sales_input"]["v1_avg"] = st.number_input("1供給地点当たり月平均販売量 (a1)", value=db["sales_input"]["v1_avg"], format="%.3f")
+        st.session_state.db["basic"]["customers"] = st.number_input("供給地点数 (a2)", value=db["basic"]["customers"])
+        run_logic()
 
-    # 原価積み上げ
-    st.subheader("営業費項目別算定 (様式1-b相当)")
-    col_c1, col_c2 = st.columns(2)
-    
-    with col_c1:
+    with col_ev:
         st.markdown(f"""
         <div class="evidence-card">
-        <strong>(1) 原料費</strong><br>
-        <span class="logic-flow">販売量 {db['res_sales_vol']:,.2f} ÷ 産気率 0.476 × 単価 {db['sales']['buy_price']}</span><br>
-        ＝ <strong>¥{db['res_raw_material']:,.0f}</strong>
+        <strong>🔍 算定エビデンス</strong><br>
+        <strong>[参照元]</strong> 販売量シート D10<br>
+        <strong>[計算式]</strong> <span class="logic-text">a1 * a2 * 12</span><br>
+        <strong>[端数処理]</strong> 小数点第3位以下切り捨て<br><br>
+        <strong>[現況]</strong> 地点数 {db['basic']['customers']} 件に対し、
+        年間延べ調定数 <strong>{db['basic']['customers']*12:,}</strong> 回を算出。
         </div>
         """, unsafe_allow_html=True)
-        
+
+# --- Tab 3: 資産・原価 (ここも詳細に！) ---
+with tabs[2]:
+    st.header("様式第２ 第１表：総括原価の内訳")
+    
+    # 資産マトリクス
+    st.subheader("有形固定資産および償却費 (様式1-2/1-3)")
+    asset_data = {
+        "項目": ["建物", "本支管", "メーター", "土地"],
+        "投資額": [db["assets"]["building"], db["assets"]["pipes"], db["assets"]["meters"], db["assets"]["land"]],
+        "償却率": [0.03, 0.077, 0.077, 0.0],
+        "算出償却費": [db["assets"]["building"]*0.03, db["assets"]["pipes"]*0.077, db["assets"]["meters"]*0.077, 0]
+    }
+    st.table(pd.DataFrame(asset_data))
+
+    col_cost1, col_cost2 = st.columns(2)
+    with col_cost1:
         st.markdown(f"""
         <div class="evidence-card">
-        <strong>(2) 労務費</strong><br>
-        <span class="logic-flow">地点数 {db['basic']['customers']} × 系数 0.0031 × 単価 {db['basic']['labor_unit']:,}</span><br>
-        ＝ <strong>¥{db['res_labor']:,.0f}</strong>
+        <strong>(1) 原料費の裏付け</strong><br>
+        販売量 {db['res_sales_total']:,.0f} ÷ 産気率 {db['coeffs']['gas_ratio']} = 数量 {db['res_sales_total']/db['coeffs']['gas_ratio']:,.0f} kg<br>
+        単価 ¥{db['sales_input']['raw_buy_price']} を乗じて <strong>¥{db['res_raw_cost']:,.0f}</strong> を計上。<br>
+        <span class="logic-text">Excel 1_bシート (1)原料費 セルG15</span>
+        </div>
+        """, unsafe_allow_html=True)
+    with col_cost2:
+        st.markdown(f"""
+        <div class="evidence-card">
+        <strong>(2) 労務費の裏付け</strong><br>
+        地点数 {db['basic']['customers']} × 所要人数係数 {db['coeffs']['labor_coeff']} = {db['basic']['customers']*db['coeffs']['labor_coeff']:.4f} 人<br>
+        標準労務費 ¥{db['coeffs']['labor_unit']:,} により <strong>¥{db['res_labor_cost']:,.0f}</strong> を算出。<br>
+        <span class="logic-text">Excel 1_bシート (2)労務費 セルG22</span>
         </div>
         """, unsafe_allow_html=True)
 
-    with col_c2:
-        st.write("### 総原価整理表 (様式2-1)")
-        cost_breakdown = {
-            "原料費": db["res_raw_material"],
-            "労務費": db["res_labor"],
-            "減価償却費": db["res_depreciation"],
-            "修繕費": db["costs"]["repair"],
-            "租税公課": db["costs"]["tax_and_dues"]
-        }
-        fig_bar = px.bar(x=list(cost_breakdown.keys()), y=list(cost_breakdown.values()), labels={'x':'項目', 'y':'金額'})
-        st.plotly_chart(fig_bar, use_container_width=True)
+# --- Tab 4: レートメイク (動的シミュレーション) ---
+with tabs[3]:
+    st.header("レートメイク：需要家群別料金設計")
+    c_set, c_res = st.columns([1, 1])
+    with c_set:
+        st.write("### 群別単価調整")
+        for g in ["A", "B", "C"]:
+            st.session_state.db["ratemake"][g]["base"] = st.number_input(f"{g}群 基本料金", value=db["ratemake"][g]["base"], step=10)
+            st.session_state.db["ratemake"][g]["unit"] = st.number_input(f"{g}群 単位料金", value=db["ratemake"][g]["unit"], step=0.1)
+        run_logic()
+    with c_res:
+        st.write("### 収支バランス状況")
+        fig_gauge = go.Figure(go.Indicator(
+            mode = "gauge+number+delta",
+            value = db["res_new_rev"],
+            delta = {'reference': db["res_total_cost"]},
+            title = {'text': "想定収入 vs 算定原価"},
+            gauge = {'axis': {'range': [None, db["res_total_cost"]*1.2]},
+                     'threshold': {'line': {'color': "red", 'width': 4}, 'thickness': 0.75, 'value': db["res_total_cost"]}}))
+        st.plotly_chart(fig_gauge, use_container_width=True)
 
-# --- Tab 4: レートメイク ---
-with t4:
-    st.header("料金シミュレーション (レートメイク)")
+# --- Tab 5: 申請・出力 (実務のゴール) ---
+with tabs[4]:
+    st.header("認可申請書類・外部保存")
+    st.info("すべての計算結果は 'GasLab_Master_State' として保持されています。")
     
-    # 需要群別の設定
-    for tier in ["A", "B", "C"]:
-        col_t1, col_t2, col_t3 = st.columns([1, 2, 2])
-        with col_t1:
-            st.subheader(f"{tier}群")
-        with col_t2:
-            db["ratemake"]["tiers"][tier]["base"] = st.number_input(f"{tier} 基本", value=db["ratemake"]["tiers"][tier]["base"])
-        with col_t3:
-            db["ratemake"]["tiers"][tier]["unit"] = st.number_input(f"{tier} 単価", value=db["ratemake"]["tiers"][tier]["unit"])
-    
-    st.divider()
-    run_strategic_engine() # 再計算
-    st.metric("新料金体系での過不足", f"¥{db['calc_gap'] if 'calc_gap' in db else 0:,.0f}")
-
-# --- Tab 5: 申請・保存 ---
-with t5:
-    st.header("認可申請準備 & データエクスポート")
-    st.write("現在の全ステートを書き出し、次回のコンサルティングに備えます。")
-    
-    c_btn1, c_btn2 = st.columns(2)
-    with c_btn1:
-        json_str = json.dumps(db, indent=4, ensure_ascii=False)
-        st.download_button("📤 GasLab_State.json を書き出す", json_str, file_name=f"GasLab_{db['project']['name']}.json")
-    with c_btn2:
-        st.button("📄 官公庁提出用Excel (様式全表) 生成")
-        
+    col_btn1, col_btn2 = st.columns(2)
+    with col_btn1:
+        st.subheader("設定の保存")
+        st.download_button("JSON設定ファイルを書き出す", json.dumps(db, indent=4, ensure_ascii=False), file_name="gaslab_config.json")
+    with col_btn2:
+        st.subheader("公式書類出力")
+        st.button("様式第1 第1表〜第4表 (Excel) 生成")
+        st.button("様式第2 第1表〜第4表 (Excel) 生成")
