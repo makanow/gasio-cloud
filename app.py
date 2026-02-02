@@ -8,7 +8,7 @@ import json
 import datetime
 
 # ---------------------------------------------------------
-# 1. 設定 & デザイン (ナガセ・オリジナルを100%復元)
+# 1. 設定 & デザイン (UI改善版)
 # ---------------------------------------------------------
 st.set_page_config(page_title="Gasio計算機", page_icon="🔥", layout="wide", initial_sidebar_state="expanded")
 
@@ -17,7 +17,28 @@ st.markdown("""
     .block-container { padding-top: 2rem; font-family: "Helvetica Neue", Arial, sans-serif; }
     .main-title { font-size: 3rem; font-weight: 800; color: #2c3e50; margin-bottom: 0px; letter-spacing: -1px; }
     .sub-title { font-size: 1.2rem; color: #7f8c8d; margin-top: -5px; margin-bottom: 20px; border-bottom: 2px solid #3498db; padding-bottom: 10px; }
-    .stMetric { background-color: #fdfdfd; padding: 15px 20px; border-radius: 6px; border-left: 5px solid #3498db; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
+    
+    /* シミュレーション・メトリクスのフォントサイズ調整 (見切れ防止) */
+    [data-testid="stMetricValue"] {
+        font-size: 1.4rem !important;
+        overflow-wrap: break-word;
+    }
+    [data-testid="stMetricLabel"] {
+        font-size: 0.85rem !important;
+    }
+
+    /* 入力可能セルの強調スタイル (st.data_editor用) */
+    .stDataEditor [data-testid="stTable"] td[aria-readonly="false"] {
+        background-color: #fffde7 !important; /* 薄い黄色で入力箇所を明示 */
+    }
+    
+    .stMetric {
+        background-color: #fdfdfd;
+        padding: 10px 15px;
+        border-radius: 6px;
+        border-left: 5px solid #3498db;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+    }
     div.stButton > button { font-weight: bold; border-radius: 4px; }
     </style>
 """, unsafe_allow_html=True)
@@ -41,7 +62,7 @@ COLOR_BAR, COLOR_CURRENT, COLOR_NEW = '#34495e', '#95a5a6', '#e67e22'
 # 2. 関数定義 (オリジナル維持)
 # ---------------------------------------------------------
 def normalize_columns(df):
-    rename_map = {'基本':'基本料金','基礎料金':'基本料金','上限':'MAX','適用上限':'MAX','ID':'料金表番号','Usage':'使用量','調定':'調定数'}
+    rename_map = {'基本':'基本料金','基礎料金':'基本料金','Base':'基本料金','上限':'MAX','適用上限':'MAX','ID':'料金表番号','Usage':'使用量','調定':'調定数'}
     df = df.rename(columns=rename_map)
     for c in ['使用量', 'MAX', '調定数']:
         if c in df.columns: df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0 if c!='MAX' else 999999999.0)
@@ -85,7 +106,7 @@ def calculate_bill_single(usage, tariff_df, billing_count=1):
     return int(row.get('基本料金', 0) + (usage * row['単位料金']))
 
 # ---------------------------------------------------------
-# 3. メイン
+# 3. UI 処理
 # ---------------------------------------------------------
 with st.sidebar:
     st.header("📂 Data Import")
@@ -110,9 +131,9 @@ with st.sidebar:
             selected_ids = st.multiselect("対象料金表", u_ids, default=u_ids)
 
     st.markdown("---")
-    if st.button("💾 設定保存ファイル作成"):
-        save_data = {'plan_data': {k: v.to_dict(orient='records') for k, v in st.session_state.plan_data.items()}, 'base_a': st.session_state.base_a}
-        st.download_button("Download JSON", json.dumps(save_data, indent=2, ensure_ascii=False), f"gasio_config_{datetime.datetime.now().strftime('%Y%m%d')}.json")
+    # 設定保存ファイル作成ボタン
+    save_json = json.dumps({'plan_data': {k: v.to_dict(orient='records') for k, v in st.session_state.plan_data.items()}, 'base_a': st.session_state.base_a}, indent=2, ensure_ascii=False)
+    st.download_button("💾 設定保存ファイル(.json)", save_json, f"gasio_config_{datetime.datetime.now().strftime('%Y%m%d')}.json", "application/json")
 
 if file_usage and file_master and selected_ids:
     df_usage = smart_load_wrapper(file_usage)
@@ -138,7 +159,15 @@ if file_usage and file_master and selected_ids:
                         if len(st.session_state.plan_data[i]) > 1:
                             st.session_state.plan_data[i] = st.session_state.plan_data[i].iloc[:-1].copy()
                             st.session_state.plan_data[i].iloc[-1, 2] = 99999.0; st.rerun()
-                    edited = st.data_editor(st.session_state.plan_data[i], use_container_width=True, key=f"ed_{i}")
+                    
+                    # 改善1: 入力可能な列にツールチップを出し、ヘルプを強化
+                    edited = st.data_editor(st.session_state.plan_data[i], use_container_width=True, key=f"ed_{i}", 
+                                           column_config={
+                                               "No": st.column_config.NumberColumn(disabled=True),
+                                               "区画名": st.column_config.TextColumn("区画名 (編集可)", help="区画の名称を入力してください"),
+                                               "適用上限(m3)": st.column_config.NumberColumn("適用上限 (編集可)", format="%.1f", help="この区画の最大使用量を入力してください"),
+                                               "単位料金": st.column_config.NumberColumn("単位料金 (編集可)", format="%.4f", help="従量単価を入力してください")
+                                           })
                     st.session_state.plan_data[i] = edited
                 with c2:
                     if not edited.empty:
@@ -150,7 +179,8 @@ if file_usage and file_master and selected_ids:
                             p_max = r['適用上限(m3)']
                         res_df = pd.DataFrame(res)
                         new_plans[f"Plan_{i+1}"] = res_df
-                        st.dataframe(res_df.style.format({"MIN":"{:.1f}","MAX":"{:.1f}","基本料金":"{:.2f}","単位料金":"{:.2f}"}), hide_index=True)
+                        # 改善2: 桁区切りを追加
+                        st.dataframe(res_df.style.format({"MIN":"{:+,.1f}","MAX":"{:+,.1f}","基本料金":"{:,.2f}","単位料金":"{:,.4f}"}), hide_index=True, use_container_width=True)
                         fig_line = px.line(x=list(range(0, 51, 2)), y=[calculate_bill_single(v, res_df) for v in range(0, 51, 2)], labels={'x':'使用量','y':'料金'}, height=250)
                         fig_line.update_traces(line_color=COLOR_BAR); st.plotly_chart(fig_line, use_container_width=True, key=f"p_l_{i}")
 
@@ -168,6 +198,8 @@ if file_usage and file_master and selected_ids:
         if st.session_state.simulation_result is not None:
             sr = st.session_state.simulation_result
             total_curr = sr['現行料金'].sum()
+            
+            # 改善3: メトリクスカラムを調整し、見切れを防止 (CSSと合わせて最適化)
             m_cols = st.columns(len(new_plans) + 1)
             m_cols[0].metric("現行 売上", f"¥{total_curr:,.0f}")
             summ_data = [{"プラン名": "現行", "売上": total_curr, "差額": 0, "増減率": 0.0}]
@@ -184,6 +216,7 @@ if file_usage and file_master and selected_ids:
             st.dataframe(pd.DataFrame(summ_data).style.format({"売上":"¥{:,.0f}","差額":"¥{:,.0f}","増減率":"{:.2f}%"}), hide_index=True, use_container_width=True)
 
     with tab3:
+        # [Analysisタブの中身は維持]
         st.markdown("##### 需要構成分析")
         sel_p = st.selectbox("比較プラン", list(new_plans.keys()), key="s_p_a")
         fps = {tid: tuple(sorted(df_master_all[df_master_all['料金表番号']==tid]['MAX'].unique())) for tid in selected_ids}
@@ -197,7 +230,7 @@ if file_usage and file_master and selected_ids:
                 df_target_usage['現行区画'] = df_target_usage['使用量'].apply(lambda x: get_tier_name(x, m_rep))
                 agg_c = df_target_usage.groupby('現行区画').agg(調定数=('調定数','sum'), 使用量=('使用量','sum')).reset_index()
                 st.plotly_chart(px.pie(agg_c, values='調定数', names='現行区画', hole=0.5, color_discrete_sequence=CHIC_PIE_COLORS), use_container_width=True, key="pie_c")
-                st.dataframe(agg_c, hide_index=True, use_container_width=True)
+                st.dataframe(agg_c.style.format({"使用量":"{:,.1f}"}), hide_index=True, use_container_width=True)
             else:
                 st.info("複数料金合算のためヒストグラムを表示")
                 st.plotly_chart(px.histogram(df_target_usage, x="使用量", color="料金表番号", nbins=50, color_discrete_sequence=CHIC_PIE_COLORS), use_container_width=True, key="hist_c")
@@ -206,6 +239,6 @@ if file_usage and file_master and selected_ids:
             df_target_usage['新区画'] = df_target_usage['使用量'].apply(lambda x: get_tier_name(x, new_plans[sel_p]))
             agg_n = df_target_usage.groupby('新区画').agg(調定数=('調定数','sum'), 使用量=('使用量','sum')).reset_index()
             st.plotly_chart(px.pie(agg_n, values='調定数', names='新区画', hole=0.5, color_discrete_sequence=CHIC_PIE_COLORS), use_container_width=True, key="pie_n")
-            st.dataframe(agg_n, hide_index=True, use_container_width=True)
+            st.dataframe(agg_n.style.format({"使用量":"{:,.1f}"}), hide_index=True, use_container_width=True)
 else:
     st.info("👈 サイドバーからCSVを読み込んでください")
