@@ -5,3 +5,4 @@ numpy
 openpyxl
 matplotlib
 jinja2
+pyxlsx
