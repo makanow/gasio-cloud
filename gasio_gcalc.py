@@ -1,107 +1,152 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-from datetime import datetime
 import math
+import json
+from datetime import datetime
 
 # =================================================================
-# 1. 精密計算ユーティリティ (端数処理の定義)
+# 1. 基幹演算ユーティリティ（端数処理・バリデーション）
 # =================================================================
-def floor_to_decimal(value, decimals=0):
-    """指定した桁数で切り捨て (ナガセ指定の小数点第3位切り捨て等に対応)"""
+def floor_val(val, decimals=0):
+    """指定桁数での切り捨て"""
+    if val is None: return 0.0
     factor = 10 ** decimals
-    return math.floor(value * factor) / factor
+    return math.floor(val * factor) / factor
 
 # =================================================================
-# 2. マスターデータ・エンジン (標準係数シートの番地解読)
+# 2. マスターデータ（標準係数シートの構造化）
 # =================================================================
-def get_pref_master(df_b, pref_name):
-    """標準係数B!B4:G50 都道府県マスターの抽出"""
-    # 実際はCSV読み込みだが、ここでは君の指定番地に基づき辞書化
-    # 北海道: 標準値8.8, 労務費5683000, 換算0.215, 産気率0.476
-    return {"std_val": 8.8, "labor_unit": 5683000, "gas_ratio": 0.476}
-
-def get_vehicle_unit_price(df_a, customers, acquisition_date):
-    """標準係数A!T3:AA24 車両スライド計算ロジック"""
-    # 1,500地点の場合の例
-    tiers = [
-        {"max": 250, "price": 4440},  # CA1
-        {"max": 1000, "price": 2610}, # CA2
-        {"max": 2000, "price": 1940}, # CA3
-        # ... 続く
-    ]
-    total_invest = 0
-    remaining = customers
-    prev_max = 0
-    for t in tiers:
-        qty = min(remaining, t["max"] - prev_max)
-        if qty <= 0: break
-        total_invest += qty * t["price"]
-        remaining -= qty
-        prev_max = t["max"]
-    return total_invest
+# ※ 本来はCSVからロードするが、プロトタイプとして君の指定番地数値を定義
+LAND_REQUIRED_AREAS = {"11": 295.0, "12": 350.0} # 標準係数B O4:X20
+PREF_COEFFS = {1: {"name": "北海道", "std_sales": 8.8, "labor_unit": 5683000, "gas_ratio": 0.476}} # 標準係数B B4:G50
 
 # =================================================================
-# 3. 算定メインエンジン (1_a, 1_b, 2_a の連鎖)
+# 3. アプリケーション・ステート初期化
 # =================================================================
-def run_gcalc_engine():
-    db = st.session_state.db
-    
-    # --- [様式1-1] ガスの販売量(A) ---
-    # ナガセ指示: 小数点第3位切り捨て
-    if db["use_std_coeff"]:
-        db["A_sales_vol"] = floor_to_decimal(db["std_val"] * db["customers"] * 12, 3)
-    else:
-        db["A_sales_vol"] = floor_to_decimal(51621.886618, 3) # 実績値
-    
-    # --- [様式1-3] (1)原料費 ---
-    # c2 = A / 産気率
-    db["c2_raw_qty"] = floor_to_decimal(db["A_sales_vol"] / db["gas_ratio"], 2)
-    # C = c2 * 単価 (円単位切り捨て)
-    db["C_raw_cost"] = math.floor(db["c2_raw_qty"] * 106.05)
-    
-    # --- [様式1-3] (2)労務費 ---
-    # d3 = 地点数 * 係数
-    db["d3_staff"] = floor_to_decimal(db["customers"] * 0.0031, 4)
-    # D = d3 * 労務費単価
-    db["D_labor_cost"] = math.floor(db["d3_staff"] * db["labor_unit"])
-    
-    # --- [様式2-1] 総原価整理 ---
-    db["total_cost"] = db["C_raw_cost"] + db["D_labor_cost"] + 10634688 # 資産・その他固定費(仮)
-    
-    # 期待値との照合
-    db["diff"] = db["total_cost"] - 30715365
-
-# =================================================================
-# 4. Streamlit UI (gasio_gcalc.py 本体)
-# =================================================================
-st.set_page_config(page_title="Gas Lab Engine", layout="wide")
-
 if 'db' not in st.session_state:
     st.session_state.db = {
-        "customers": 487, "std_val": 8.8, "gas_ratio": 0.476, "labor_unit": 5683000,
-        "use_std_coeff": False
+        "pref_id": 1, "customers": 487.0,
+        "asset_mode": "実績", "use_reduction": True,
+        "labor_mode": "標準", "repair_mode": "標準",
+        "demand_mode": "手入力",
+        "actual_land_area": 649.1, "actual_land_price": 15300000.0,
+        "land_id": "11",
+        "assets_list": [
+            {"name": "建物", "actual": 5368245.0, "std": 5000000.0, "is_reduction": True},
+            {"name": "本支管", "actual": 36814400.0, "std": 35000000.0, "is_reduction": False}
+        ],
+        "tier_data": [
+            {"群名": "A", "比率": 0.850},
+            {"群名": "B", "比率": 0.130},
+            {"群名": "C", "比率": 0.020}
+        ]
     }
 
-st.title("🧪 Gas Lab Engine : 移植検証版")
+db = st.session_state.db
 
-t1, t2, t3 = st.tabs(["Dashboard", "1_a 販売量", "1_b 営業費"])
+# =================================================================
+# 4. 計算エンジン：ナガセ・プロトコル
+# =================================================================
+def run_calculation():
+    # --- A. 販売量算定 ---
+    pref = PREF_COEFFS[db["pref_id"]]
+    db["res_sales_a1"] = pref["std_sales"]
+    db["res_vol_A"] = floor_val(db["res_sales_a1"] * db["customers"] * 12, 3)
 
-with t1:
-    run_engine = st.button("計算実行・検算")
-    if run_engine:
-        run_gcalc_engine()
-        res = st.session_state.db
-        st.metric("算定総括原価", f"¥{res['total_cost']:,}")
-        st.metric("Excel正解値との差分", f"¥{res['diff']:,}", delta=res['diff'], delta_color="inverse")
+    # --- B. 土地の認容面積判定（自動カット） ---
+    req_area = LAND_REQUIRED_AREAS.get(db["land_id"], 0.0)
+    db["res_land_area_final"] = min(db["actual_land_area"], req_area)
+    # 単価計算（実績ベース）
+    unit_price = db["actual_land_price"] / db["actual_land_area"]
+    db["res_land_invest"] = db["res_land_area_final"] * unit_price
 
-with t2:
-    st.write("### 様式第１ 第１表")
-    st.session_state.db["use_std_coeff"] = st.checkbox("標準係数を使用")
-    st.write(f"ガスの販売量(A): {st.session_state.db.get('A_sales_vol', 0):,.3f} ㎥")
+    # --- C. 投資額の振り分け（投資額①・②） ---
+    db["invest_1"] = db["res_land_invest"] # 土地は通常①
+    db["invest_2"] = 0.0
+    for asset in db["assets_list"]:
+        val = asset["actual"] if db["asset_mode"] == "実績" else asset["std"]
+        if asset["is_reduction"] and db["use_reduction"]:
+            db["invest_2"] += val
+        else:
+            db["invest_1"] += val
 
-with t3:
-    st.write("### 様式第１ 第３表")
-    col1, col2 = st.columns(2)
-    col1.write(f"原料費(C): ¥{st.session_state.db.get('C_raw_cost', 0):,}")
-    col2.write(f"労務費(D): ¥{st.session_state.db.get('D_labor_cost', 0):,}")
+    # --- D. 労務費・原料費 ---
+    staff = floor_val(db["customers"] * 0.0031, 4)
+    db["res_labor_cost"] = math.floor(staff * pref["labor_unit"])
+    db["res_raw_cost"] = math.floor((db["res_vol_A"] / pref["gas_ratio"]) * 106.05)
+
+    # --- E. 修繕費 ---
+    if db["repair_mode"] == "実績":
+        db["res_repair"] = 1571432.0
+    else:
+        db["res_repair"] = math.floor((db["invest_1"] + db["invest_2"]) * 0.03)
+
+    # 総計
+    db["total_cost"] = db["res_raw_cost"] + db["res_labor_cost"] + db["res_repair"] + 5000000.0 # その他固定
+
+# =================================================================
+# 5. メインUIレイアウト
+# =================================================================
+st.title("🧪 Gas Lab Engine v2.5")
+
+# サイドバー：経営判断スイッチ
+with st.sidebar:
+    st.header("🕹️ Strategic Switches")
+    db["asset_mode"] = st.radio("投資額ソース", ["実績", "標準"], index=0)
+    db["use_reduction"] = st.checkbox("減免措置を適用", value=db["use_reduction"])
+    db["repair_mode"] = st.radio("修繕費ソース", ["実績", "標準"], index=1)
+    db["demand_mode"] = st.radio("需要構成率ソース", ["手入力", "都道府県引用"], index=0)
+    
+    if st.button("🚀 計算実行"):
+        run_calculation()
+        st.success("計算完了")
+
+# タブ構成
+t_dash, t_asset, t_rate = st.tabs(["🚀 Dashboard", "🏗️ 資産・土地認容性", "📊 レートメイク"])
+
+with t_dash:
+    st.header("算定総括原価（速報値）")
+    c1, c2 = st.columns(2)
+    c1.metric("総括原価", f"¥{db.get('total_cost', 0):,.0f}")
+    c1.metric("投資額①", f"¥{db.get('invest_1', 0):,.0f}")
+    c2.metric("投資額②（減免対象）", f"¥{db.get('invest_2', 0):,.0f}")
+    
+    st.divider()
+    st.subheader("原価の内訳")
+    cost_data = {
+        "項目": ["原料費", "労務費", "修繕費"],
+        "金額": [db.get("res_raw_cost", 0), db.get("res_labor_cost", 0), db.get("res_repair", 0)]
+    }
+    st.bar_chart(pd.DataFrame(cost_data).set_index("項目"))
+
+with t_asset:
+    st.header("土地の認容面積判定")
+    col_l, col_r = st.columns(2)
+    with col_l:
+        st.write("### 実績値")
+        st.write(f"実績面積: {db['actual_land_area']} m2")
+        st.write(f"実績総額: ¥{db['actual_land_price']:,.0f}")
+    with col_r:
+        st.write("### 判定結果（自動カット適用）")
+        st.info(f"標準所要面積上限: {LAND_REQUIRED_AREAS[db['land_id']]} m2")
+        st.metric("認容面積", f"{db.get('res_land_area_final', 0)} m2")
+        st.metric("認容投資額", f"¥{db.get('res_land_invest', 0):,.0f}")
+
+with t_rate:
+    st.header("需要家群の動的設定")
+    if db["demand_mode"] == "手入力":
+        # 動的グリッド
+        df_tier = pd.DataFrame(db["tier_data"])
+        edited_df = st.data_editor(df_tier, num_rows="dynamic", use_container_width=True)
+        
+        total = edited_df["比率"].sum()
+        st.progress(min(total, 1.0), text=f"合計: {total:.4f}")
+        
+        if abs(total - 1.0) < 0.0001:
+            st.success("✅ 合計が1.0に一致しました")
+            db["tier_data"] = edited_df.to_dict('records')
+        else:
+            st.error("❌ 合計を1.0に調整してください")
+    else:
+        st.info("都道府県データを引用しています（3段階固定）")
