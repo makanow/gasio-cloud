@@ -1,174 +1,143 @@
 import streamlit as st
 import pandas as pd
+import json
+from datetime import datetime
 import plotly.graph_objects as go
 
-# ----------------------------------------------------------------
-# 1. ページ構成・基本設定
-# ----------------------------------------------------------------
-st.set_page_config(page_title="Gas Lab Engine - Integrated Cockpit", layout="wide")
+# =================================================================
+# 1. 定数・マスターデータの定義（本来はCSVからロードする部分）
+# =================================================================
+PREF_MASTER = {
+    "北海道": {"産気率": 0.476, "労務費単価": 5683000, "標準販売量": 8.8},
+    "佐渡": {"産気率": 0.450, "労務費単価": 5100000, "標準販売量": 7.5}
+}
 
-# カスタムCSS: 視認性とプロフェッショナルな質感を両立
-st.markdown("""
-    <style>
-    .stTabs [data-baseweb="tab-list"] { gap: 24px; }
-    .stTabs [data-baseweb="tab"] { height: 50px; white-space: pre-wrap; font-weight: bold; }
-    .evidence-card { background-color: #f0f7f9; border-left: 5px solid #0077b6; padding: 15px; margin: 10px 0; border-radius: 4px; }
-    .learning-card { background-color: #fdfae6; border-left: 5px solid #f39c12; padding: 15px; margin: 10px 0; border-radius: 4px; }
-    .status-badge { padding: 4px 8px; border-radius: 12px; font-size: 0.8em; color: white; background-color: #2ecc71; }
-    </style>
-    """, unsafe_allow_html=True)
+# =================================================================
+# 2. アプリケーション・ステートの初期化（Excelファイルそのものに相当）
+# =================================================================
+if 'db' not in st.session_state:
+    st.session_state.db = {
+        "metadata": {"project": "Gas Lab 料金算定", "version": "1.0", "updated": ""},
+        "basic": {"pref": "北海道", "customers": 487, "is_single_house": True},
+        "sales": {"avg_monthly": 8.833, "unit_price_buy": 106.05},
+        "assets": {
+            "land": {"area": 649.1, "price": 15300000, "eval_price": 6126190},
+            "building": {"total_invest": 5368245, "dep_rate": 0.03}
+        },
+        "ratemake": {
+            "target_profit_rate": 0.03,
+            "current_revenue": 27251333,
+            "new_base_a": 1200, "new_unit_a": 550,
+            "new_base_b": 1800, "new_unit_b": 475
+        }
+    }
 
-# ----------------------------------------------------------------
-# 2. サイドバー：グローバル設定（全てのタブに影響）
-# ----------------------------------------------------------------
+# =================================================================
+# 3. 計算エンジン (Excelの数式をすべてここに集約)
+# =================================================================
+def run_engine():
+    db = st.session_state.db
+    pref_data = PREF_MASTER.get(db["basic"]["pref"])
+    
+    # --- 販売量計算 ---
+    db["calc_sales_volume"] = db["sales"]["avg_monthly"] * db["basic"]["customers"] * 12
+    
+    # --- 原料費計算 ---
+    db["calc_raw_material_qty"] = db["calc_sales_volume"] / pref_data["産気率"]
+    db["calc_raw_material_cost"] = db["calc_raw_material_qty"] * db["sales"]["unit_price_buy"]
+    
+    # --- 労務費計算 (様式1_b相当) ---
+    # 仮に地点数から所要人数を出すロジック
+    db["calc_staff_count"] = 0.0031 * db["basic"]["customers"]
+    db["calc_labor_cost"] = db["calc_staff_count"] * pref_data["労務費単価"]
+    
+    # --- 総原価集計 ---
+    db["calc_total_cost"] = (
+        db["calc_raw_material_cost"] + 
+        db["calc_labor_cost"] + 
+        (db["assets"]["building"]["total_invest"] * db["assets"]["building"]["dep_rate"]) +
+        1571432 # 修繕費等（固定値または別計算）
+    )
+    
+    # --- 改定率計算 ---
+    db["calc_revision_rate"] = (db["calc_total_cost"] / db["ratemake"]["current_revenue"] - 1) * 100
+
+# =================================================================
+# 4. ユーザーインターフェース (Streamlit)
+# =================================================================
+st.set_page_config(page_title="Gas Lab Engine Full-Spec", layout="wide")
+
+# サイドバー: 永続化（外への書き出し機能）
 with st.sidebar:
     st.title("🧪 Gas Lab Engine")
-    st.write(f"**Pilot: ナガセ 顧問**")
+    mode = st.radio("表示モード", ["実務・算定", "学習・ガイド"])
     
     st.divider()
-    app_mode = st.radio("表示モード", ["実務・算定モード (Practical)", "学習・ガイドモード (Education)"])
+    st.subheader("💾 データエクスポート")
+    json_str = json.dumps(st.session_state.db, indent=4, ensure_ascii=False)
+    st.download_button("設定をJSONで書き出す", json_str, file_name="gas_lab_data.json")
     
     st.divider()
-    st.subheader("基本パラメータ設定")
-    selected_pref = st.selectbox("都道府県選択", ["北海道", "青森", "岩手", "新潟", "佐渡"])
-    # 都道府県に応じたダミー係数（本来は標準係数B.csvから取得）
-    pref_coeffs = {
-        "北海道": {"labor": 5683000, "gas_ratio": 0.476, "pref_code": 1},
-        "佐渡": {"labor": 5100000, "gas_ratio": 0.450, "pref_code": 15}
-    }.get(selected_pref, {"labor": 5000000, "gas_ratio": 0.460, "pref_code": 0})
-    
-    st.info(f"適用係数: {selected_pref}\n- 産気率: {pref_coeffs['gas_ratio']}\n- 労務費単価: {pref_coeffs['labor']:,}")
+    if st.button("全計算を強制再実行"):
+        run_engine()
+        st.success("Re-calculated.")
 
-# ----------------------------------------------------------------
-# 3. メインコンテンツ：業務フローに沿ったタブ構成
-# ----------------------------------------------------------------
-tabs = st.tabs([
-    "📍 ナビ / 基本情報", 
-    "📊 販売量算定 (様式1-1)", 
-    "🏗️ 資産・投資 (様式1-2)", 
-    "💰 総原価算出 (様式2-1)", 
-    "📈 レートメイク",
-    "📄 申請書類出力"
-])
+# メインエリア: タブによる構造化
+tabs = st.tabs(["📍 基本/ナビ", "📊 販売量(様式1-1)", "🏗️ 資産・原価(1-3)", "📈 レートメイク", "📄 申請書出力"])
 
-# --- Tab 1: ナビ / 基本情報 ---
+# --- Tab 1: 基本設定 ---
 with tabs[0]:
-    st.header("プロジェクト・ダッシュボード")
-    col1, col2, col3 = st.columns(3)
-    col1.metric("現在の総原価", "¥30,715,365", delta="前回比 +2.4%")
-    col2.metric("必要収益率", "12.8%", delta="ターゲット 15.0%", delta_color="inverse")
-    col3.metric("供給地点数", "487 地点", help="許可地点数ベース")
-    
-    st.write("### 算定ステータス")
-    st.table(pd.DataFrame({
-        "工程": ["販売量確定", "資産評価", "原価配分", "レートメイク"],
-        "進捗": ["✅ 完了", "✅ 完了", "🟡 計算中", "⏳ 未着手"],
-        "最終更新": ["2024/05/10", "2024/05/10", "Now", "-"]
-    }))
+    st.header("プロジェクト基本設定")
+    col1, col2 = st.columns(2)
+    with col1:
+        st.session_state.db["basic"]["pref"] = st.selectbox("対象都道府県", list(PREF_MASTER.keys()))
+        st.session_state.db["basic"]["customers"] = st.number_input("供給地点数", value=st.session_state.db["basic"]["customers"])
+    with col2:
+        st.info("ここで選択した都道府県により、産気率や標準労務費が自動的に適用されます。")
 
-# --- Tab 2: 販売量算定 ---
+# --- Tab 2: 販売量 (Excel 1_aに相当) ---
 with tabs[1]:
-    st.header("様式第１ 第１表：ガスの販売量")
-    
-    col_in, col_exp = st.columns([2, 1])
-    with col_in:
-        st.subheader("需要予測入力")
-        v1 = st.number_input("1供給地点当たり月平均販売量 [㎥/月・件]", value=8.833, step=0.001, format="%.3f")
-        v2 = st.number_input("供給地点数 [件]", value=487)
-        total_v = v1 * v2 * 12
-        st.success(f"年間ガス販売量 (A) = {total_v:,.2f} ㎥/年")
-        
-        if app_mode == "学習・ガイドモード":
-            with st.expander("❓ なぜこの計算が必要か"):
-                st.write("ガスの販売量は、原料費の算定だけでなく、固定費を1㎥あたりに按分する際の分母になります。ここが1%ズレると、最終的な単価に大きな影響を与えます。")
-
-    with col_exp:
-        st.markdown(f"""
-        <div class="evidence-card">
-        <strong>🔍 エビデンス・証明</strong><br>
-        - 参照元: <code>'販売量'シート</code><br>
-        - セル: <code>D10</code> (供給約款合計)<br>
-        - 法令根拠: ガス事業法施行規則第○条
-        </div>
-        """, unsafe_allow_html=True)
-
-# --- Tab 3: 資産・投資 ---
-with tabs[2]:
-    st.header("様式第１ 第２表：有形固定資産額")
-    
-    item = st.selectbox("資産カテゴリー", ["土地", "建物", "構築物", "導管（鋼管）", "導管（PE管）", "メーター"])
-    
-    c1, c2 = st.columns(2)
+    st.header("ガスの販売量算定")
+    c1, c2 = st.columns([2, 1])
     with c1:
-        st.write("### 標準投資額との比較")
-        # 実際には標準係数A.csvから取得
-        std_val = 12670 
-        actual_val = st.number_input(f"{item} の単位投資額 [円/地点]", value=std_val)
-        st.write(f"全地点投資額: ¥{(actual_val * v2):,}")
+        st.session_state.db["sales"]["avg_monthly"] = st.number_input("月平均販売量 (a1)", value=st.session_state.db["sales"]["avg_monthly"], format="%.3f")
+        run_engine() # 入力のたびに計算を実行
+        st.metric("年間販売量 (A)", f"{st.session_state.db['calc_sales_volume']:,.2f} ㎥")
     
-    with c2:
-        # 償却率の表示
-        dep_rate = 0.03 # 建物
-        st.write("### 減価償却シミュレーション")
-        st.info(f"法定耐用年数に基づく償却率: {dep_rate}")
-        st.metric("年分減価償却費", f"¥{(actual_val * v2 * dep_rate):,.0f}")
+    if mode == "学習・ガイド":
+        with c2:
+            st.warning("【教育用解説】\nこの数値は総原価を割る「分母」となります。地点数が増えるほど固定費の1㎥あたり単価は下がります。")
 
-# --- Tab 4: 総原価算出 ---
-with tabs[3]:
-    st.header("様式第２ 第１表：総原価整理表")
-    
-    # ここで全ての計算を集計するイメージ
-    st.write("各部門から集計された原価要素の最終確認を行います。")
-    
+# --- Tab 3: 原価 (Excel 1_b / 2_aに相当) ---
+with tabs[2]:
+    st.header("総原価整理")
+    run_engine()
     costs = {
-        "原料費": 11501052,
-        "労務費": 8579625,
-        "修繕費": 1571432,
-        "減価償却費": 3892269,
-        "租税公課": 266530,
-        "事業報酬": 1613897
+        "原料費": st.session_state.db["calc_raw_material_cost"],
+        "労務費": st.session_state.db["calc_labor_cost"],
+        "その他": 1571432
     }
-    
-    df_costs = pd.DataFrame(costs.items(), columns=["項目", "金額(円)"])
-    st.table(df_costs)
-    
-    if app_mode == "実務・算定モード (Practical)":
-        st.button("全計算ロジックの再検証 (バリデーション)")
+    st.table(pd.DataFrame(costs.items(), columns=["項目", "金額(円)"]))
+    st.metric("総括原価 合計", f"¥{st.session_state.db['calc_total_cost']:,.0f}")
 
-# --- Tab 5: レートメイク ---
-with tabs[4]:
-    st.header("料金設計シミュレーター")
+# --- Tab 4: レートメイク ---
+with tabs[3]:
+    st.header("レートメイク・シミュレーション")
+    col_in, col_graph = st.columns([1, 2])
+    with col_in:
+        st.session_state.db["ratemake"]["new_base_a"] = st.slider("新基本料金(A)", 500, 2000, st.session_state.db["ratemake"]["new_base_a"])
+        st.session_state.db["ratemake"]["new_unit_a"] = st.slider("新単位料金(A)", 300, 800, st.session_state.db["ratemake"]["new_unit_a"])
+        run_engine()
+        st.metric("必要改定率", f"{st.session_state.db['calc_revision_rate']:.2f}%")
     
-    col_p, col_g = st.columns([1, 2])
-    with col_p:
-        st.write("### 新料金案のスライダー")
-        base_a = st.slider("A群 基本料金 (0-8㎥)", 500, 2000, 1200)
-        unit_a = st.slider("A群 単位料金", 300, 800, 550)
-        
-        st.divider()
-        st.write("### 収支バランス")
-        total_rev = (base_a * v2 * 12) + (unit_a * total_v) # 簡易計算
-        st.metric("想定料金収入", f"¥{total_rev:,.0f}")
-        gap = total_rev - sum(costs.values())
-        st.metric("収支差額 (過不足)", f"¥{gap:,.0f}", delta=f"{gap:,.0f}")
-
-    with col_g:
-        st.write("### 改定前後の料金比較")
-        # グラフ描画
-        fig = go.Figure()
-        fig.add_trace(go.Bar(x=['現行料金', '新料金案', '総原価'], y=[27251333, total_rev, sum(costs.values())], marker_color=['gray', 'blue', 'red']))
+    with col_graph:
+        # グラフ: 収支バランス
+        fig = go.Figure(go.Bar(x=['原価', '現行収入'], y=[st.session_state.db['calc_total_cost'], st.session_state.db['ratemake']['current_revenue']]))
         st.plotly_chart(fig, use_container_width=True)
 
-# --- Tab 6: 申請書類出力 ---
-with tabs[5]:
+# --- Tab 5: 出力 ---
+with tabs[4]:
     st.header("認可申請書類・エクスポート")
-    
-    st.info("すべての計算結果が整合しています。役所指定のExcel書式、および計算根拠説明書を出力可能です。")
-    
-    col_out1, col_out2 = st.columns(2)
-    with col_out1:
-        st.subheader("1. 認可申請用Excel")
-        st.button("様式第1〜第2（全表）をエクスポート")
-    with col_out2:
-        st.subheader("2. 計算根拠説明書 (PDF)")
-        st.button("全エビデンス付き解説書を生成")
+    st.write("計算が完了しました。以下のボタンから各書類を生成します。")
+    st.button("様式第1〜第2（官公庁提出用Excel）を出力")
+    st.button("計算根拠エビデンス集 (PDF) を出力")
