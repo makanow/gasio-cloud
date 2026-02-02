@@ -22,7 +22,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.markdown('<div class="main-title"><span style="color:#2c3e50">Gas</span><span style="color:#e74c3c">i</span><span style="color:#3498db">o</span> 計算機</div>', unsafe_allow_html=True)
-st.markdown('<div class="sub-title">Cloud Edition - Rate Simulation System</div>', unsafe_allow_html=True)
+st.markdown('<div class="sub-title">Cloud Edition - Simulation System</div>', unsafe_allow_html=True)
 
 # --- ステート管理 ---
 if 'simulation_result' not in st.session_state: st.session_state.simulation_result = None
@@ -34,7 +34,7 @@ if 'plan_data' not in st.session_state:
 CHIC_PIE_COLORS = ['#88a0b9', '#aab7b8', '#82e0aa', '#f5b7b1', '#d7bde2', '#f9e79f']
 
 # ---------------------------------------------------------
-# 2. 関数定義 (エラー箇所を修正)
+# 2. 関数定義
 # ---------------------------------------------------------
 def normalize_columns(df):
     rename_map = {'基本':'基本料金', '適用上限':'MAX', '上限':'MAX', '単位':'単位料金', '単価':'単位料金', 'ID':'料金表番号', 'Usage':'使用量', '調定':'調定数'}
@@ -44,7 +44,7 @@ def normalize_columns(df):
     if '料金表番号' not in df.columns: df['料金表番号'] = 10
     return df
 
-def smart_load_wrapper(file, file_type='generic'):
+def smart_load_wrapper(file):
     for enc in ['cp932', 'utf-8', 'shift_jis']:
         try:
             file.seek(0); df = pd.read_csv(file, encoding=enc)
@@ -52,6 +52,17 @@ def smart_load_wrapper(file, file_type='generic'):
             return normalize_columns(df)
         except: continue
     return None
+
+def get_tier_name(usage, tariff_df):
+    if tariff_df.empty: return "Unknown"
+    df = tariff_df.copy()
+    if '適用上限(m3)' in df.columns: df = df.rename(columns={'適用上限(m3)':'MAX'})
+    df['MAX'] = pd.to_numeric(df['MAX'], errors='coerce').fillna(999999999.0)
+    sorted_df = df.sort_values('MAX').reset_index(drop=True)
+    applicable = sorted_df[sorted_df['MAX'] >= (usage - 1e-9)]
+    row = applicable.iloc[0] if not applicable.empty else sorted_df.iloc[-1]
+    name = str(row['区画名']) if '区画名' in row else str(row.get('区画', row.name+1))
+    return name
 
 def calculate_slide_rates(base_a, blocks_df):
     blocks = blocks_df.copy().sort_values('No')
@@ -70,19 +81,8 @@ def calculate_bill_single(usage, tariff_df, billing_count=1):
     row = target.iloc[0] if not target.empty else df.sort_values('MAX').iloc[-1]
     return int(row['基本料金'] + (usage * row['単位料金']))
 
-def get_tier_name(usage, tariff_df):
-    if tariff_df.empty: return "Unknown"
-    df = tariff_df.copy()
-    if '適用上限(m3)' in df.columns: df = df.rename(columns={'適用上限(m3)':'MAX'})
-    df['MAX'] = pd.to_numeric(df['MAX'], errors='coerce').fillna(999999999.0)
-    sorted_df = df.sort_values('MAX').reset_index(drop=True)
-    applicable = sorted_df[sorted_df['MAX'] >= (usage - 1e-9)]
-    row = applicable.iloc[0] if not applicable.empty else sorted_df.iloc[-1]
-    name = str(row['区画名']) if '区画名' in row else str(row.get('区画', row.name+1))
-    return name
-
 # ---------------------------------------------------------
-# 3. サイドバー
+# 3. UI
 # ---------------------------------------------------------
 with st.sidebar:
     st.header("📂 Data Import")
@@ -100,7 +100,7 @@ with st.sidebar:
         df_master_all = smart_load_wrapper(file_master)
         u_ids = sorted(df_master_all['料金表番号'].unique())
         selected_ids = st.multiselect("対象料金表", u_ids, default=u_ids)
-
+    
     if st.button("💾 設定保存"):
         save_data = {'plan_data':{k:v.to_dict(orient='records') for k,v in st.session_state.plan_data.items()}, 'base_a':st.session_state.base_a}
         st.download_button("Download JSON", json.dumps(save_data), "config.json")
@@ -112,6 +112,15 @@ if file_usage and file_master and selected_ids:
     df_usage = smart_load_wrapper(file_usage)
     df_target_usage = df_usage[df_usage['料金表番号'].isin(selected_ids)].copy()
     
+    # 構造整合性チェック（指紋判定）
+    fps = {}
+    for tid in selected_ids:
+        m_sub = df_master_all[df_master_all['料金表番号'] == tid].sort_values('MAX')
+        if not m_sub.empty:
+            f = sorted(m_sub['MAX'].unique()); f[-1] = 999999999.0
+            fps[tid] = tuple(f)
+    ids_consistent = (len(set(fps.values())) <= 1)
+
     t1, t2, t3 = st.tabs(["Design", "Simulation", "Analysis"])
 
     with t1:
@@ -134,35 +143,44 @@ if file_usage and file_master and selected_ids:
                             p_max = r['適用上限(m3)']
                         res_df = pd.DataFrame(res)
                         new_plans[f"Plan_{i+1}"] = res_df
-                        
-                        # 【修正】文字列の列を除外してフォーマットを適用（ValueErrorを完全封殺）
-                        st.dataframe(res_df.style.format({
-                            "MIN": "{:,.1f}", "MAX": "{:,.1f}", "基本料金": "{:,.2f}", "単位料金": "{:,.2f}"
-                        }), hide_index=True, use_container_width=True)
+                        st.dataframe(res_df.style.format({"MIN": "{:,.1f}", "MAX": "{:,.1f}", "基本料金": "{:,.2f}", "単位料金": "{:,.2f}"}), hide_index=True)
 
     with t2:
-        if st.button("🚀 シミュレーション計算", type="primary"):
+        if st.button("🚀 計算実行", type="primary"):
             res = df_target_usage.copy()
+            # 現行料金の計算
             res['現行料金'] = res.apply(lambda r: calculate_bill_single(r['使用量'], df_master_all[df_master_all['料金表番号']==r['料金表番号']], r['調定数']), axis=1)
+            # 新プランの計算
             for pn, pdf in new_plans.items():
                 res[pn] = res.apply(lambda r: calculate_bill_single(r['使用量'], pdf, r['調定数']), axis=1)
+                res[f"{pn}_差額"] = res[pn] - res['現行料金']
             st.session_state.simulation_result = res
-            st.success("計算完了")
         
         if st.session_state.simulation_result is not None:
-            st.dataframe(st.session_state.simulation_result.head())
+            sr = st.session_state.simulation_result
+            total_curr = sr['現行料金'].sum()
+            summ = [{"プラン名":pn, "売上":sr[pn].sum(), "差額":sr[pn].sum()-total_curr} for pn in new_plans]
+            st.dataframe(pd.DataFrame(summ).style.format({"売上":"¥{:,.0f}", "差額":"¥{:,.0f}"}), hide_index=True)
 
     with t3:
         st.markdown("##### 需要構成分析")
-        sel_p = st.selectbox("比較対象プラン", list(new_plans.keys()))
-        master_rep = df_master_all[df_master_all['料金表番号'] == selected_ids[0]].sort_values('MAX').reset_index(drop=True)
-        df_target_usage['現行区画'] = df_target_usage['使用量'].apply(lambda x: get_tier_name(x, master_rep))
-        
-        agg_c = df_target_usage.groupby('現行区画').agg(調定数=('調定数','sum'), 総使用量=('使用量','sum')).reset_index()
-        c1, c2 = st.columns(2)
-        c1.plotly_chart(px.pie(agg_c, values='調定数', names='現行区画', hole=0.5, color_discrete_sequence=CHIC_PIE_COLORS, title="現行：調定数シェア"), use_container_width=True)
-        c2.plotly_chart(px.pie(agg_c, values='総使用量', names='現行区画', hole=0.5, color_discrete_sequence=CHIC_PIE_COLORS, title="現行：使用量シェア"), use_container_width=True)
-        st.dataframe(agg_c, hide_index=True)
+        if ids_consistent:
+            # 統合分析
+            master_rep = df_master_all[df_master_all['料金表番号'] == selected_ids[0]].sort_values('MAX').reset_index(drop=True)
+            df_target_usage['現行区画'] = df_target_usage['使用量'].apply(lambda x: get_tier_name(x, master_rep))
+            agg_c = df_target_usage.groupby('現行区画').agg(調定数=('調定数','sum'), 使用量=('使用量','sum')).reset_index()
+            
+            # 並び替え
+            l_order = [get_tier_name(r['MAX']-1e-6, master_rep) for _, r in master_rep.iterrows()]
+            agg_c['order'] = agg_c['現行区画'].apply(lambda x: l_order.index(x) if x in l_order else 99)
+            agg_c = agg_c.sort_values('order').drop(columns='order')
+
+            c1, c2 = st.columns(2)
+            c1.plotly_chart(px.pie(agg_c, values='調定数', names='現行区画', hole=0.5, color_discrete_sequence=CHIC_PIE_COLORS, title="調定数シェア"), use_container_width=True)
+            c2.plotly_chart(px.pie(agg_c, values='使用量', names='現行区画', hole=0.5, color_discrete_sequence=CHIC_PIE_COLORS, title="使用量シェア"), use_container_width=True)
+            st.dataframe(agg_c.style.format({"使用量":"{:.1f}"}), hide_index=True, use_container_width=True)
+        else:
+            st.warning("境界不一致のため詳細分析不可。個別にIDを選択してください。")
 
 else:
-    st.info("👈 サイドバーからCSVを読み込んでください")
+    st.info("👈 CSVを読み込んでください")
