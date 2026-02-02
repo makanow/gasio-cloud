@@ -1,61 +1,72 @@
 import streamlit as st
 import pandas as pd
-import math
+import openpyxl
 import re
 
-# 1. 状態の初期化
-if 'db' not in st.session_state:
-    st.session_state.db = {}
-db = st.session_state.db
+st.set_page_config(page_title="Gas Lab Engine : THE CLONE", layout="wide")
 
-def cell(df, ref):
-    """Excel住所から値を抽出し、同時にその値を返す"""
-    try:
-        m = re.match(r"([A-Z]+)([0-9]+)", ref)
-        c_str, r_str = m.groups()
-        c_idx = 0
-        for char in c_str: c_idx = c_idx * 26 + (ord(char) - ord('A') + 1)
-        val = df.iloc[int(r_str)-1, c_idx-1]
-        if pd.isna(val) or val == "": return 0.0
-        return float(str(val).replace(',', '').replace('¥', '').strip())
-    except: return 0.0
-
-st.title("🧪 Gas Lab Engine : 算定根拠可視化モデル")
-
-uploaded_file = st.file_uploader("G-Calc_master.xlsx をロード", type=["xlsx"])
-
-if uploaded_file:
-    sheets = pd.read_excel(uploaded_file, sheet_name=None, header=None)
+# --- 1. 万能座標・数式解析エンジン ---
+class GasLogicEngine:
+    def __init__(self, uploaded_file):
+        # 演算用(値)と解析用(数式)の二刀流
+        self.wb_val = openpyxl.load_workbook(uploaded_file, data_only=True, read_only=True)
+        self.wb_form = openpyxl.load_workbook(uploaded_file, data_only=False, read_only=True)
     
-    # --- 算定プロセスの「解体」 ---
-    if "別表4,5" in sheets:
-        df_b = sheets["別表4,5"]
-        # I56に至る主要な内訳セルを特定（これらは一般的な別表4,5の構成に基づく例）
-        db["final_cost"] = cell(df_b, "I56")      # 総括原価合計
-        db["op_expenses"] = cell(df_b, "I40")     # 営業費小計（人件費・修繕費等）
-        db["depreciation"] = cell(df_b, "I45")    # 減価償却費
-        db["taxes"] = cell(df_b, "I48")           # 租税公課
-        db["return_val"] = cell(df_b, "I52")      # 事業報酬
-        
-    if "販売量" in sheets:
-        db["vol_yakkan"] = cell(sheets["販売量"], "O8") # 規制部門
-        db["vol_others"] = cell(sheets["販売量"], "O9") + cell(sheets["販売量"], "O10") # 自由部門
+    def get_val(self, sheet, addr):
+        return self.wb_val[sheet][addr].value
 
-# --- Dashboard : ホワイトボックス表示 ---
-if uploaded_file:
-    st.header("📊 算定 Dashboard (透明性確保版)")
-    c1, c2, c3 = st.columns(3)
-    c1.metric("総括原価 (I56)", f"¥{db['final_cost']:,.0f}")
-    c2.metric("約款販売量 (O8)", f"{db['vol_yakkan']:,.1f} m3")
-    c3.metric("確定供給単価", f"{db['final_cost']/db['vol_yakkan']:,.2f} 円/m3")
+    def get_formula(self, sheet, addr):
+        return self.wb_form[sheet][addr].value
 
-    st.subheader("🔍 総括原価の内訳（別表4,5 トレーサビリティ）")
-    # ウォーターフォール図的な内訳表示
-    breakdown_data = {
-        "項目": ["営業費 (人件費・修繕費等)", "減価償却費", "租税公課", "事業報酬"],
-        "金額 (円)": [db['op_expenses'], db['depreciation'], db['taxes'], db['return_val']],
-        "Excel座標": ["I40", "I45", "I48", "I52"]
+# --- 2. 算定ロジックの「完全同期」 ---
+def run_perfect_sync(engine):
+    results = {}
+    
+    # 【出口】別表4,5 I56 (総括原価)
+    results["final_total"] = engine.get_val("別表4,5", "I56")
+    results["final_formula"] = engine.get_formula("別表4,5", "I56")
+    
+    # 【分母】販売量 O8 (約款分)
+    results["vol_yakkan"] = engine.get_val("販売量", "O8")
+    results["vol_yakkan_formula"] = engine.get_formula("販売量", "O8")
+    
+    # 【中身】主要経費の滝 (ホワイトボックス化)
+    keys = {
+        "営業費小計": "I40", "減価償却費": "I45", 
+        "租税公課": "I48", "事業報酬": "I52"
     }
-    st.table(pd.DataFrame(breakdown_data))
+    for label, addr in keys.items():
+        results[label] = {
+            "val": engine.get_val("別表4,5", addr),
+            "formula": engine.get_formula("別表4,5", addr)
+        }
+    
+    return results
 
-    st.info("💡 この数値は「別表4,5」の各集計行から直接取得しています。Excel側の数式を変更すると、ここの内訳も自動的に追従します。")
+# --- 3. UI構築 ---
+st.title("🛡️ Gas Lab Engine : 法廷品質・完全再現モデル")
+
+uploaded_file = st.file_uploader("算定Excelをアップロード", type=["xlsx"])
+
+if uploaded_file:
+    engine = GasLogicEngine(uploaded_file)
+    data = run_perfect_sync(engine)
+    
+    # 算定 Dashboard
+    st.header("📊 算定結果")
+    c1, c2, c3 = st.columns(3)
+    c1.metric("総括原価 (I56)", f"¥{data['final_total']:,.0f}")
+    c2.metric("約款販売量 (O8)", f"{data['vol_yakkan']:,.1f} m3")
+    unit_price = data['final_total'] / data['vol_yakkan'] if data['vol_yakkan'] > 0 else 0
+    c3.metric("確定供給単価", f"{unit_price:,.2f} 円/m3")
+
+    # ブラックボックスの解体（完全再現の証明）
+    st.subheader("🕵️ ロジック・オーディター（監査ログ）")
+    audit_log = []
+    for label in ["営業費小計", "減価償却費", "租税公課", "事業報酬"]:
+        audit_log.append({
+            "項目": label,
+            "金額": f"¥{data[label]['val']:,.0f}",
+            "Excel数式": data[label]['formula']
+        })
+    st.table(pd.DataFrame(audit_log))
