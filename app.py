@@ -8,7 +8,7 @@ import json
 import datetime
 
 # ---------------------------------------------------------
-# 1. 設定 & デザイン (UI改善版)
+# 1. 設定 & デザイン (Gasio Blue セル・ハック)
 # ---------------------------------------------------------
 st.set_page_config(page_title="Gasio計算機", page_icon="🔥", layout="wide", initial_sidebar_state="expanded")
 
@@ -23,15 +23,14 @@ st.markdown("""
         font-size: 1.4rem !important;
         overflow-wrap: break-word;
     }
-    [data-testid="stMetricLabel"] {
-        font-size: 0.85rem !important;
+    [data-testid="stMetricLabel"] { font-size: 0.85rem !important; }
+
+    /* 【Gasioスタイル】編集可能なセルを薄い青色で強調 */
+    [data-testid="stDataEditor"] div[data-testid="stTable"] td[aria-readonly="false"] {
+        background-color: #e3f2fd !important; /* Gasio Light Blue */
+        border: 1px solid #bbdefb !important;
     }
 
-    /* 入力可能セルの強調スタイル (st.data_editor用) */
-    .stDataEditor [data-testid="stTable"] td[aria-readonly="false"] {
-        background-color: #fffde7 !important; /* 薄い黄色で入力箇所を明示 */
-    }
-    
     .stMetric {
         background-color: #fdfdfd;
         padding: 10px 15px;
@@ -59,7 +58,7 @@ CHIC_PIE_COLORS = ['#88a0b9', '#aab7b8', '#82e0aa', '#f5b7b1', '#d7bde2', '#f9e7
 COLOR_BAR, COLOR_CURRENT, COLOR_NEW = '#34495e', '#95a5a6', '#e67e22'
 
 # ---------------------------------------------------------
-# 2. 関数定義 (オリジナル維持)
+# 2. 関数定義
 # ---------------------------------------------------------
 def normalize_columns(df):
     rename_map = {'基本':'基本料金','基礎料金':'基本料金','Base':'基本料金','上限':'MAX','適用上限':'MAX','ID':'料金表番号','Usage':'使用量','調定':'調定数'}
@@ -131,7 +130,6 @@ with st.sidebar:
             selected_ids = st.multiselect("対象料金表", u_ids, default=u_ids)
 
     st.markdown("---")
-    # 設定保存ファイル作成ボタン
     save_json = json.dumps({'plan_data': {k: v.to_dict(orient='records') for k, v in st.session_state.plan_data.items()}, 'base_a': st.session_state.base_a}, indent=2, ensure_ascii=False)
     st.download_button("💾 設定保存ファイル(.json)", save_json, f"gasio_config_{datetime.datetime.now().strftime('%Y%m%d')}.json", "application/json")
 
@@ -160,13 +158,13 @@ if file_usage and file_master and selected_ids:
                             st.session_state.plan_data[i] = st.session_state.plan_data[i].iloc[:-1].copy()
                             st.session_state.plan_data[i].iloc[-1, 2] = 99999.0; st.rerun()
                     
-                    # 改善1: 入力可能な列にツールチップを出し、ヘルプを強化
+                    # 改善: 余計なテキストを排し、CSS(水色)で編集箇所を特定させる
                     edited = st.data_editor(st.session_state.plan_data[i], use_container_width=True, key=f"ed_{i}", 
                                            column_config={
                                                "No": st.column_config.NumberColumn(disabled=True),
-                                               "区画名": st.column_config.TextColumn("区画名 (編集可)", help="区画の名称を入力してください"),
-                                               "適用上限(m3)": st.column_config.NumberColumn("適用上限 (編集可)", format="%.1f", help="この区画の最大使用量を入力してください"),
-                                               "単位料金": st.column_config.NumberColumn("単位料金 (編集可)", format="%.4f", help="従量単価を入力してください")
+                                               "区画名": st.column_config.TextColumn("区画名"),
+                                               "適用上限(m3)": st.column_config.NumberColumn("適用上限", format="%.1f"),
+                                               "単位料金": st.column_config.NumberColumn("単位料金", format="%.4f")
                                            })
                     st.session_state.plan_data[i] = edited
                 with c2:
@@ -179,8 +177,11 @@ if file_usage and file_master and selected_ids:
                             p_max = r['適用上限(m3)']
                         res_df = pd.DataFrame(res)
                         new_plans[f"Plan_{i+1}"] = res_df
-                        # 改善2: 桁区切りを追加
-                        st.dataframe(res_df.style.format({"MIN":"{:+,.1f}","MAX":"{:+,.1f}","基本料金":"{:,.2f}","単位料金":"{:,.4f}"}), hide_index=True, use_container_width=True)
+                        # 改善: 桁区切りと小数点桁数を実務仕様へ
+                        st.dataframe(res_df.style.format({
+                            "MIN": "{:,.1f}", "MAX": "{:,.1f}", 
+                            "基本料金": "{:,.2f}", "単位料金": "{:,.4f}"
+                        }), hide_index=True, use_container_width=True)
                         fig_line = px.line(x=list(range(0, 51, 2)), y=[calculate_bill_single(v, res_df) for v in range(0, 51, 2)], labels={'x':'使用量','y':'料金'}, height=250)
                         fig_line.update_traces(line_color=COLOR_BAR); st.plotly_chart(fig_line, use_container_width=True, key=f"p_l_{i}")
 
@@ -199,7 +200,7 @@ if file_usage and file_master and selected_ids:
             sr = st.session_state.simulation_result
             total_curr = sr['現行料金'].sum()
             
-            # 改善3: メトリクスカラムを調整し、見切れを防止 (CSSと合わせて最適化)
+            # 改善: カラム数を増やしつつフォントを制御して見切れを防止
             m_cols = st.columns(len(new_plans) + 1)
             m_cols[0].metric("現行 売上", f"¥{total_curr:,.0f}")
             summ_data = [{"プラン名": "現行", "売上": total_curr, "差額": 0, "増減率": 0.0}]
@@ -213,14 +214,17 @@ if file_usage and file_master and selected_ids:
             sel_p = gc1.selectbox("分析対象プラン", list(new_plans.keys()), key="s_p_g")
             with gc1: st.plotly_chart(px.histogram(sr, x=f"{sel_p}_差額", nbins=50, title="影響額分布", color_discrete_sequence=[COLOR_NEW]), use_container_width=True, key="h_s")
             with gc2: st.plotly_chart(px.scatter(sr.sample(min(len(sr),1000)), x='使用量', y=['現行料金', sel_p], title="新旧料金プロット", opacity=0.6), use_container_width=True, key="s_s")
-            st.dataframe(pd.DataFrame(summ_data).style.format({"売上":"¥{:,.0f}","差額":"¥{:,.0f}","増減率":"{:.2f}%"}), hide_index=True, use_container_width=True)
+            st.dataframe(pd.DataFrame(summ_data).style.format({
+                "売上": "¥{:,.0f}", "差額": "¥{:,.0f}", "増減率": "{:.2f}%"
+            }), hide_index=True, use_container_width=True)
 
     with tab3:
-        # [Analysisタブの中身は維持]
         st.markdown("##### 需要構成分析")
         sel_p = st.selectbox("比較プラン", list(new_plans.keys()), key="s_p_a")
+        # 合算指紋
         fps = {tid: tuple(sorted(df_master_all[df_master_all['料金表番号']==tid]['MAX'].unique())) for tid in selected_ids}
-        for tid in fps: l = list(fps[tid]); l[-1] = 999999999.0; fps[tid] = tuple(l)
+        for tid in fps: 
+            l = list(fps[tid]); l[-1] = 999999999.0; fps[tid] = tuple(l)
         
         g1, g2 = st.columns(2)
         with g1:
