@@ -4,20 +4,22 @@ import plotly.express as px
 import numpy as np
 
 # ---------------------------------------------------------
-# 1. 設定 & デザイン
+# 1. 設定 & デザイン (ロゴカラー修復済)
 # ---------------------------------------------------------
 st.set_page_config(page_title="Gasio mini", page_icon="🔥", layout="wide")
 
 st.markdown("""
     <style>
     .block-container { padding-top: 2rem; }
+    /* タイトルのフォントサイズとウェイト */
     .main-title { font-size: 3rem; font-weight: 800; color: #2c3e50; text-align: left; margin-bottom: 0; letter-spacing: -1px; }
     .sub-title { font-size: 1.2rem; color: #7f8c8d; text-align: left; border-bottom: 2px solid #3498db; padding-bottom: 10px; margin-bottom: 20px;}
     .stMetric { background-color: #f8f9fa; border-radius: 5px; padding: 10px; border-left: 4px solid #3498db; }
     </style>
 """, unsafe_allow_html=True)
 
-st.markdown('<div class="main-title">Gasio mini</div>', unsafe_allow_html=True)
+# ロゴの文字色修復: i(赤), o(青)
+st.markdown('<div class="main-title"><span style="color:#2c3e50">Gas</span><span style="color:#e74c3c">i</span><span style="color:#3498db">o</span> mini</div>', unsafe_allow_html=True)
 st.markdown('<div class="sub-title">Current Status Visualizer (Stable Aggregation)</div>', unsafe_allow_html=True)
 
 # ---------------------------------------------------------
@@ -107,7 +109,6 @@ if file_usage and file_master:
         
         df_target['Current_Tier'] = df_target['使用量'].apply(lambda x: get_tier_name(x, master_rep))
         
-        # 【修正】集計後の型を float に固定
         agg_df = df_target.groupby('Current_Tier', as_index=False).agg({
             '調定数': 'sum',
             '使用量': 'sum'
@@ -137,7 +138,6 @@ if file_usage and file_master:
             chic_colors = ['#88a0b9', '#aab7b8', '#82e0aa', '#f5b7b1', '#d7bde2', '#f9e79f']
             
             with g1:
-                # 【修正】valuesに列名（文字列）を指定
                 fig1 = px.pie(agg_df, values='調定数', names='Current_Tier', hole=0.5, 
                               color_discrete_sequence=chic_colors, title="調定数シェア")
                 st.plotly_chart(fig1, use_container_width=True)
