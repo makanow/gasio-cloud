@@ -245,7 +245,7 @@ if file_usage and file_master and selected_ids:
                 st.plotly_chart(px.pie(agg_c, values='件数', names='現行区画', hole=0.5, color_discrete_sequence=CHIC_PIE_COLORS), use_container_width=True)
                 st.dataframe(agg_c.style.format({"使用量":"{:,.1f}"}), hide_index=True, use_container_width=True)
             else:
-                st.info("⚠️ 複数料金合算のためヒストグラムを表示")
+                st.info("⚠️ 異なる区画の料金表が混在しているため、分布図を表示")
                 st.plotly_chart(px.histogram(df_target_usage, x="使用量", color="料金表番号", nbins=50, color_discrete_sequence=CHIC_PIE_COLORS), use_container_width=True)
         with g2:
             st.markdown(f"**Proposal: {sel_p}構成**")
