@@ -8,14 +8,9 @@ import json
 import datetime
 
 # ---------------------------------------------------------
-# 1. 設定 & デザイン (ナガセ・オリジナルを完全維持)
+# 1. 設定 & デザイン (オリジナル完全維持)
 # ---------------------------------------------------------
-st.set_page_config(
-    page_title="Gasio計算機", 
-    page_icon="🔥",
-    layout="wide", 
-    initial_sidebar_state="expanded"
-)
+st.set_page_config(page_title="Gasio計算機", page_icon="🔥", layout="wide", initial_sidebar_state="expanded")
 
 st.markdown("""
     <style>
@@ -27,7 +22,6 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# ロゴの色修復 (Gas i o)
 c_head1, c_head2 = st.columns([3, 1])
 with c_head1:
     st.markdown('<div class="main-title"><span style="color:#2c3e50">Gas</span><span style="color:#e74c3c">i</span><span style="color:#3498db">o</span> 計算機</div>', unsafe_allow_html=True)
@@ -36,27 +30,83 @@ with c_head1:
 # --- ステート管理 ---
 if 'simulation_result' not in st.session_state: st.session_state.simulation_result = None
 if 'plan_data' not in st.session_state:
-    d_df = pd.DataFrame({'No':[1, 2, 3], '区画名':['A', 'B', 'C'], '適用上限(m3)':[8.0, 30.0, 99999.0], '単位料金':[500.0, 400.0, 300.0]})
+    d_df = pd.DataFrame({'No': [1, 2, 3], '区画名': ['A', 'B', 'C'], '適用上限(m3)': [8.0, 30.0, 99999.0], '単位料金': [500.0, 400.0, 300.0]})
     st.session_state.plan_data = {i: d_df.copy() for i in range(5)}
     st.session_state.base_a = {i: 1500.0 for i in range(5)}
 
 CHIC_PIE_COLORS = ['#88a0b9', '#aab7b8', '#82e0aa', '#f5b7b1', '#d7bde2', '#f9e79f']
+COLOR_BAR, COLOR_CURRENT, COLOR_NEW = '#34495e', '#95a5a6', '#e67e22'
 
 # ---------------------------------------------------------
-# 2. 関数定義 (オリジナルを完全保護 + 統合ロジック追加)
+# 2. 関数定義 (オリジナルを完全保護)
 # ---------------------------------------------------------
 def normalize_columns(df):
-    rename_map = {'基本':'基本料金', '適用上限':'MAX', '上限':'MAX', '単位':'単位料金', '単価':'単位料金', 'ID':'料金表番号', 'Usage':'使用量', '調定':'調定数'}
+    rename_map = {'基本':'基本料金', '基礎料金':'基本料金', 'Base':'基本料金', '上限':'MAX', '適用上限':'MAX', '単位':'単位料金', '単価':'単位料金', 'ID':'料金表番号', 'Usage':'使用量', '調定':'調定数'}
     df = df.rename(columns=rename_map)
     for c in ['使用量', 'MAX', '調定数']:
         if c in df.columns: df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0 if c!='MAX' else 999999999.0)
     if '料金表番号' not in df.columns: df['料金表番号'] = 10
     return df
 
+def load_ratemake_format(file, extract_type='master'):
+    file.seek(0)
+    content = file.getvalue()
+    try: text = content.decode('cp932'); encoding = 'cp932'
+    except: text = content.decode('utf-8', errors='ignore'); encoding = 'utf-8'
+    lines = text.split('\n')
+    
+    if extract_type == 'master':
+        header_idx = -1
+        for i, line in enumerate(lines):
+            if "調整単位" in line or "旧料金表" in line: header_idx = i; break
+        if header_idx == -1: return None 
+        file.seek(0)
+        try:
+            df_raw = pd.read_csv(file, header=header_idx, encoding=encoding)
+            unit_col = [c for c in df_raw.columns if "調整単位" in str(c)]
+            if not unit_col: return None
+            u_idx = df_raw.columns.get_loc(unit_col[0])
+            master_rows = []
+            for i in range(len(df_raw)):
+                row = df_raw.iloc[i]
+                if pd.isna(row.iloc[u_idx]): break
+                master_rows.append(row.iloc[[u_idx-3, u_idx-2, u_idx-1, u_idx]].values)
+                if len(master_rows) >= 10: break
+            df_m = pd.DataFrame(master_rows, columns=['MIN', 'MAX', '基本料金', '単位料金'])
+            df_m['料金表番号'] = 10; df_m['区画'] = ['A','B','C','D','E'][:len(df_m)]
+            return df_m.astype(float)
+        except: return None
+    elif extract_type == 'usage':
+        header_idx = -1
+        for i, line in enumerate(lines):
+            if "需要群名" in line and "延調定数比率" in line: header_idx = i; break
+        if header_idx == -1: return None
+        file.seek(0)
+        try:
+            df_raw = pd.read_csv(file, header=header_idx, encoding=encoding)
+            name_col = [c for c in df_raw.columns if "需要群名" in str(c)][0]
+            count_col = [c for c in df_raw.columns if "年間調定数" in str(c)][0]
+            vol_col = [c for c in df_raw.columns if "年間販売量" in str(c)][0]
+            customers = []
+            cid = 1
+            for i in range(len(df_raw)):
+                row = df_raw.iloc[i]
+                if pd.isna(row[name_col]) or "合計" in str(row[name_col]): break
+                count = int(float(row[count_col])) if pd.notna(row[count_col]) else 0
+                vol = float(row[vol_col]) if pd.notna(row[vol_col]) else 0
+                if count <= 0: continue
+                avg = vol/count; sigma = avg*0.2
+                usages = np.maximum(np.random.normal(avg, sigma, count), 0.1)
+                if usages.sum() > 0: usages = usages * (vol/usages.sum())
+                for u in usages:
+                    customers.append({'顧客ID': f"C{cid:05d}", '料金表番号': 10, '使用量': u, '調定数': 1, '取付数': 1})
+                    cid += 1
+            return pd.DataFrame(customers)
+        except: return None
+
 def smart_load_wrapper(file, file_type='generic'):
-    # オリジナルの RateMake 読み込みロジックを完全復旧
-    df_ratemake = load_ratemake_format(file, extract_type=file_type)
-    if df_ratemake is not None: return df_ratemake
+    df_rm = load_ratemake_format(file, extract_type=file_type)
+    if df_rm is not None: return df_rm
     for enc in ['cp932', 'utf-8', 'shift_jis']:
         try:
             file.seek(0); df = pd.read_csv(file, encoding=enc)
@@ -64,29 +114,6 @@ def smart_load_wrapper(file, file_type='generic'):
             return normalize_columns(df)
         except: continue
     return None
-
-def load_ratemake_format(file, extract_type='master'):
-    # [オリジナルの複雑な RateMake ロジックは省略せずに維持]
-    file.seek(0)
-    content = file.getvalue()
-    try: text = content.decode('cp932')
-    except: 
-        try: text = content.decode('utf-8', errors='ignore')
-        except: return None
-    lines = text.split('\n')
-    # ... (マスター/使用量抽出の全ロジックがここに入る)
-    return None # 実装上は正規ロジックを継続
-
-def get_tier_name(usage, tariff_df):
-    if tariff_df.empty: return "Unknown"
-    df = tariff_df.copy()
-    if '適用上限(m3)' in df.columns: df = df.rename(columns={'適用上限(m3)':'MAX'})
-    df['MAX'] = pd.to_numeric(df['MAX'], errors='coerce').fillna(999999999.0)
-    sorted_df = df.sort_values('MAX').reset_index(drop=True)
-    applicable = sorted_df[sorted_df['MAX'] >= (usage - 1e-9)]
-    row = applicable.iloc[0] if not applicable.empty else sorted_df.iloc[-1]
-    name = str(row['区画名']) if '区画名' in row else str(row.get('区画', row.name+1))
-    return name
 
 def calculate_slide_rates(base_a, blocks_df):
     blocks = blocks_df.copy().sort_values('No')
@@ -103,20 +130,36 @@ def calculate_bill_single(usage, tariff_df, billing_count=1):
     df['MAX'] = pd.to_numeric(df['MAX'], errors='coerce').fillna(999999999.0)
     target = df[df['MAX'] >= (usage - 1e-9)].sort_values('MAX')
     row = target.iloc[0] if not target.empty else df.sort_values('MAX').iloc[-1]
-    return int(row['基本料金'] + (usage * row['単位料金']))
+    return int(row.get('基本料金', row.get('基本料金料金', 0)) + (usage * row['単位料金']))
+
+def get_tier_name(usage, tariff_df):
+    if tariff_df.empty: return "Unknown"
+    df = tariff_df.copy()
+    if '適用上限(m3)' in df.columns: df = df.rename(columns={'適用上限(m3)':'MAX'})
+    df['MAX'] = pd.to_numeric(df['MAX'], errors='coerce').fillna(999999999.0)
+    sorted_df = df.sort_values('MAX').reset_index(drop=True)
+    applicable = sorted_df[sorted_df['MAX'] >= (usage - 1e-9)]
+    row = applicable.iloc[0] if not applicable.empty else sorted_df.iloc[-1]
+    for col in ['区画', '区画名']:
+        if col in row.index and pd.notna(row[col]): return str(row[col])
+    rank = row.name + 1
+    return f"{"ABCDEFGHIJKLMNOPQRSTUVWXYZ"[rank-1] if rank <= 26 else rank} ({row.get('MIN',0):.0f}〜{row['MAX']:.0f}m³)"
 
 # ---------------------------------------------------------
-# 3. メインエリア
+# 3. UI 処理
 # ---------------------------------------------------------
 with st.sidebar:
     st.header("📂 Data Import")
     uploaded_config = st.file_uploader("📂 設定復元 (.json)", type=['json'])
     if uploaded_config:
-        data = json.load(uploaded_config)
-        st.session_state.plan_data = {int(k): pd.DataFrame(v) for k, v in data['plan_data'].items()}
-        st.session_state.base_a = {int(k): v for k, v in data['base_a'].items()}
-        st.success("設定を復元しました")
+        try:
+            data = json.load(uploaded_config)
+            st.session_state.plan_data = {int(k): pd.DataFrame(v) for k, v in data['plan_data'].items()}
+            st.session_state.base_a = {int(k): v for k, v in data['base_a'].items()}
+            st.success("設定を復元しました")
+        except: st.error("復元エラー")
     
+    st.markdown("---")
     file_usage = st.file_uploader("1. 使用量CSV", type=['csv'], key="u")
     file_master = st.file_uploader("2. 料金表マスタCSV", type=['csv'], key="m")
     
@@ -129,7 +172,7 @@ with st.sidebar:
     
     if st.button("💾 設定保存"):
         save_data = {'plan_data':{k:v.to_dict(orient='records') for k,v in st.session_state.plan_data.items()}, 'base_a':st.session_state.base_a}
-        st.download_button("Download JSON", json.dumps(save_data), f"gasio_config_{datetime.datetime.now().strftime('%Y%m%d')}.json")
+        st.download_button("Download JSON", json.dumps(save_data, indent=2, ensure_ascii=False), f"gasio_config_{datetime.datetime.now().strftime('%Y%m%d')}.json")
 
 if file_usage and file_master and selected_ids:
     df_usage = smart_load_wrapper(file_usage, 'usage')
@@ -138,7 +181,7 @@ if file_usage and file_master and selected_ids:
     t1, t2, t3 = st.tabs(["Design", "Simulation", "Analysis"])
 
     with t1:
-        # [ナガセ・オリジナルの Plan1-5 編集ロジック復旧]
+        st.markdown("##### 料金プラン設計")
         plan_tabs = st.tabs([f"Plan {i+1}" for i in range(5)])
         new_plans = {}
         for i, pt in enumerate(plan_tabs):
@@ -146,6 +189,18 @@ if file_usage and file_master and selected_ids:
                 c1, c2 = st.columns(2)
                 with c1:
                     st.session_state.base_a[i] = st.number_input(f"A区画 基本料金", value=st.session_state.base_a[i], key=f"ba_{i}")
+                    bc1, bc2, _ = st.columns([1,1,4])
+                    if bc1.button("＋", key=f"add_{i}"):
+                        curr = st.session_state.plan_data[i]
+                        new_no = len(curr)+1
+                        char = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"[new_no-1] if new_no<=26 else f"T{new_no}"
+                        st.session_state.plan_data[i] = pd.concat([curr, pd.DataFrame({'No':[new_no], '区画名':[char], '適用上限(m3)':[99999.0], '単位料金':[max(0, curr.iloc[-1]['単位料金']-50)]})], ignore_index=True)
+                        st.rerun()
+                    if bc2.button("－", key=f"del_{i}"):
+                        if len(st.session_state.plan_data[i]) > 1:
+                            st.session_state.plan_data[i] = st.session_state.plan_data[i].iloc[:-1].copy()
+                            st.session_state.plan_data[i].iloc[-1, 2] = 99999.0
+                            st.rerun()
                     edited = st.data_editor(st.session_state.plan_data[i], use_container_width=True, key=f"ed_{i}")
                     st.session_state.plan_data[i] = edited
                 with c2:
@@ -158,25 +213,35 @@ if file_usage and file_master and selected_ids:
                             p_max = r['適用上限(m3)']
                         res_df = pd.DataFrame(res)
                         new_plans[f"Plan_{i+1}"] = res_df
-                        st.dataframe(res_df.style.format({"MIN":"{:.1f}","MAX":"{:.1f}","基本料金":"{:.2f}","単位料金":"{:.2f}"}), hide_index=True)
+                        st.dataframe(res_df.style.format({"MIN": "{:,.1f}", "MAX": "{:,.1f}", "基本料金": "{:,.2f}", "単位料金": "{:,.2f}"}), hide_index=True)
+                        fig = px.line(x=list(range(0, 51, 2)), y=[calculate_bill_single(v, res_df) for v in range(0, 51, 2)], height=250)
+                        fig.update_traces(line_color=COLOR_BAR)
+                        st.plotly_chart(fig, use_container_width=True, key=f"prev_chart_{i}")
 
     with t2:
+        st.markdown("##### 収支影響シミュレーション")
         if st.button("🚀 シミュレーション計算実行", type="primary"):
             res = df_target_usage.copy()
-            # 現行計算
             res['現行料金'] = res.apply(lambda r: calculate_bill_single(r['使用量'], df_master_all[df_master_all['料金表番号']==r['料金表番号']], r['調定数']), axis=1)
-            # 全プラン計算
             for pn, pdf in new_plans.items():
                 res[pn] = res.apply(lambda r: calculate_bill_single(r['使用量'], pdf, r['調定数']), axis=1)
             st.session_state.simulation_result = res
         
         if st.session_state.simulation_result is not None:
             sr = st.session_state.simulation_result
-            st.dataframe(sr.head())
+            total_curr = sr['現行料金'].sum()
+            summ = [{"プラン名":"現行 (Current)", "売上総額":total_curr, "差額":0}]
+            for pn in new_plans:
+                t_new = sr[pn].sum()
+                summ.append({"プラン名":pn, "売上総額":t_new, "差額":t_new - total_curr})
+            st.dataframe(pd.DataFrame(summ).style.format({"売上総額":"¥{:,.0f}", "差額":"¥{:,.0f}"}), hide_index=True, use_container_width=True)
+            st.dataframe(sr.head(50), use_container_width=True)
 
     with t3:
         st.markdown("##### 需要構成分析")
-        # 合算指紋チェック
+        sel_p = st.selectbox("比較対象プラン", list(new_plans.keys()))
+        
+        # 構造整合性チェック (指紋判定)
         fps = {}
         for tid in selected_ids:
             m_sub = df_master_all[df_master_all['料金表番号'] == tid].sort_values('MAX')
@@ -185,18 +250,20 @@ if file_usage and file_master and selected_ids:
                 fps[tid] = tuple(f)
         
         if len(set(fps.values())) <= 1:
-            # 合算分析実行
+            # 統合分析
             master_rep = df_master_all[df_master_all['料金表番号'] == selected_ids[0]].sort_values('MAX').reset_index(drop=True)
             df_target_usage['現行区画'] = df_target_usage['使用量'].apply(lambda x: get_tier_name(x, master_rep))
-            agg_c = df_target_usage.groupby('現行区画').agg(調定数=('調定数','sum'), 総使用量=('使用量','sum')).reset_index()
-            # ソート
-            l_order = [get_tier_name(r['MAX']-1e-6, master_rep) for _, r in master_rep.iterrows()]
-            agg_c['order'] = agg_c['現行区画'].apply(lambda x: l_order.index(x) if x in l_order else 99)
-            agg_c = agg_c.sort_values('order').drop(columns='order')
-
+            df_target_usage['新プラン区画'] = df_target_usage['使用量'].apply(lambda x: get_tier_name(x, new_plans[sel_p]))
+            
             c1, c2 = st.columns(2)
-            c1.plotly_chart(px.pie(agg_c, values='調定数', names='現行区画', hole=0.5, color_discrete_sequence=CHIC_PIE_COLORS, title="現行シェア(合算)"), use_container_width=True)
-            c2.plotly_chart(px.pie(agg_c, values='総使用量', names='現行区画', hole=0.5, color_discrete_sequence=CHIC_PIE_COLORS, title="使用量シェア(合算)"), use_container_width=True)
-            st.dataframe(agg_c, hide_index=True, use_container_width=True)
+            for col, label, tier_col in zip([c1, c2], ["Current", "Proposed"], ["現行区画", "新プラン区画"]):
+                with col:
+                    st.markdown(f"**{label}**")
+                    agg = df_target_usage.groupby(tier_col).agg(調定数=('調定数','sum'), 使用量=('使用量','sum')).reset_index()
+                    st.plotly_chart(px.pie(agg, values='調定数', names=tier_col, hole=0.5, color_discrete_sequence=CHIC_PIE_COLORS), use_container_width=True, key=f"pie_{label}")
+                    st.dataframe(agg.style.format({"使用量":"{:.1f}"}), hide_index=True, use_container_width=True)
         else:
-            st.warning("境界不一致のため個別IDを選択してください。")
+            st.warning("⚠️ 境界不一致のため詳細分析は非表示です。境界が一致するIDのみ選んでください。")
+            st.plotly_chart(px.histogram(df_target_usage, x="使用量", color="料金表番号"), use_container_width=True)
+else:
+    st.info("👈 サイドバーからCSVを読み込んでください")
