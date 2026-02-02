@@ -8,7 +8,7 @@ import json
 import datetime
 
 # ---------------------------------------------------------
-# 1. 設定 & デザイン (Gasio Blue + Yellow Pen Icon)
+# 1. 設定 & デザイン (Gasio Style & UI Fixes)
 # ---------------------------------------------------------
 st.set_page_config(page_title="Gasio計算機", page_icon="🔥", layout="wide", initial_sidebar_state="expanded")
 
@@ -18,7 +18,7 @@ st.markdown("""
     .main-title { font-size: 3rem; font-weight: 800; color: #2c3e50; margin-bottom: 0px; letter-spacing: -1px; }
     .sub-title { font-size: 1.2rem; color: #7f8c8d; margin-top: -5px; margin-bottom: 20px; border-bottom: 2px solid #3498db; padding-bottom: 10px; }
     
-    /* メトリクス見切れ防止 */
+    /* メトリクス見切れ防止：フォントサイズと折り返し設定 */
     [data-testid="stMetricValue"] { font-size: 1.3rem !important; overflow-wrap: break-word; }
     [data-testid="stMetricLabel"] { font-size: 0.8rem !important; }
 
@@ -44,7 +44,7 @@ with c_head1:
     st.markdown('<div class="main-title"><span style="color:#2c3e50">Gas</span><span style="color:#e74c3c">i</span><span style="color:#3498db">o</span> 計算機</div>', unsafe_allow_html=True)
     st.markdown('<div class="sub-title">Cloud Edition - Rate Simulation System</div>', unsafe_allow_html=True)
 
-# ステート管理
+# --- ステート管理 ---
 if 'simulation_result' not in st.session_state: st.session_state.simulation_result = None
 if 'plan_data' not in st.session_state:
     d_df = pd.DataFrame({'No': [1, 2, 3], '区画名': ['A', 'B', 'C'], '適用上限(m3)': [8.0, 30.0, 99999.0], '単位料金': [500.0, 400.0, 300.0]})
@@ -55,7 +55,7 @@ CHIC_PIE_COLORS = ['#88a0b9', '#aab7b8', '#82e0aa', '#f5b7b1', '#d7bde2', '#f9e7
 COLOR_BAR, COLOR_CURRENT, COLOR_NEW = '#34495e', '#95a5a6', '#e67e22'
 
 # ---------------------------------------------------------
-# 2. 関数定義
+# 2. 関数定義 (堅牢な数値処理)
 # ---------------------------------------------------------
 def normalize_columns(df):
     rename_map = {'基本':'基本料金','基礎料金':'基本料金','Base':'基本料金','上限':'MAX','適用上限':'MAX','ID':'料金表番号','Usage':'使用量','調定':'調定数'}
@@ -102,7 +102,7 @@ def calculate_bill_single(usage, tariff_df, billing_count=1):
     return int(row.get('基本料金', 0) + (usage * row['単位料金']))
 
 # ---------------------------------------------------------
-# 3. サイドバー
+# 3. サイドバー (インポート & エクスポート)
 # ---------------------------------------------------------
 with st.sidebar:
     st.header("📂 Data Import")
@@ -127,8 +127,9 @@ with st.sidebar:
             selected_ids = st.multiselect("対象料金表", u_ids, default=u_ids)
 
     st.markdown("---")
-    save_json = json.dumps({'plan_data': {k: v.to_dict(orient='records') for k, v in st.session_state.plan_data.items()}, 'base_a': st.session_state.base_a}, indent=2, ensure_ascii=False)
-    st.download_button("💾 設定保存(.json)", save_json, f"gasio_config_{datetime.datetime.now().strftime('%Y%m%d')}.json", "application/json")
+    # 設定保存(.json)
+    save_json_data = json.dumps({'plan_data': {k: v.to_dict(orient='records') for k, v in st.session_state.plan_data.items()}, 'base_a': st.session_state.base_a}, indent=2, ensure_ascii=False)
+    st.download_button("💾 設定保存(.json)", save_json_data, f"gasio_config_{datetime.datetime.now().strftime('%Y%m%d')}.json", "application/json")
 
 # ---------------------------------------------------------
 # 4. メイン
@@ -152,8 +153,7 @@ if file_usage and file_master and selected_ids:
                     if bc1.button("＋", key=f"add_{i}"):
                         curr = st.session_state.plan_data[i]
                         new_no = len(curr)+1
-                        char = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"[new_no-1] if new_no<=26 else f"T{new_no}"
-                        st.session_state.plan_data[i] = pd.concat([curr, pd.DataFrame({'No':[new_no], '区画名':[char], '適用上限(m3)':[99999.0], '単位料金':[max(0, curr.iloc[-1]['単位料金']-50)]})], ignore_index=True); st.rerun()
+                        st.session_state.plan_data[i] = pd.concat([curr, pd.DataFrame({'No':[new_no], '区画名':["ABCDEFGHIJKLMNOPQRSTUVWXYZ"[new_no-1] if new_no<=26 else f"T{new_no}"], '適用上限(m3)':[99999.0], '単位料金':[max(0.0, curr.iloc[-1]['単位料金']-50.0)]})], ignore_index=True); st.rerun()
                     if bc2.button("－", key=f"del_{i}"):
                         if len(st.session_state.plan_data[i]) > 1:
                             st.session_state.plan_data[i] = st.session_state.plan_data[i].iloc[:-1].copy()
@@ -196,37 +196,37 @@ if file_usage and file_master and selected_ids:
             sr = st.session_state.simulation_result
             total_curr = sr['現行料金'].sum()
             
+            # メトリクス表示
             m_cols = st.columns(len(new_plans) + 1)
             m_cols[0].metric("現行 売上", f"¥{total_curr:,.0f}")
-            summ_list = [{"プラン名": "現行", "売上": total_curr, "差額": 0, "増減率": 0.0}]
+            summ_list = [{"プラン名": "現行", "売上総額": total_curr, "差額": 0, "増減率": 0.0}]
             for idx, pn in enumerate(new_plans.keys()):
                 t_new = sr[pn].sum(); diff = t_new - total_curr; ratio = (diff/total_curr*100) if total_curr else 0
-                summ_list.append({"プラン名": pn, "売上": t_new, "差額": diff, "増減率": ratio})
+                summ_list.append({"プラン名": pn, "売上総額": t_new, "差額": diff, "増減率": ratio})
                 m_cols[idx+1].metric(f"{pn}", f"¥{t_new:,.0f}", f"{ratio:+.2f}%")
             
             st.markdown("---")
             
-            # --- Excel出力機能 ---
+            # Excel出力用バッファ (openpyxlエンジンを使用)
             output = io.BytesIO()
-            with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+            with pd.ExcelWriter(output, engine='openpyxl') as writer:
                 pd.DataFrame(summ_list).to_excel(writer, index=False, sheet_name='Summary')
                 sr.to_excel(writer, index=False, sheet_name='Detail')
             
-            st.download_button(label="📊 シミュレーション結果をExcelで保存", data=output.getvalue(), file_name=f"Gasio_Simulation_{datetime.datetime.now().strftime('%Y%m%d')}.xlsx")
+            st.download_button(label="📊 レポートをExcelで保存", data=output.getvalue(), file_name=f"Gasio_Simulation_{datetime.datetime.now().strftime('%Y%m%d')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
             gc1, gc2 = st.columns(2)
             sel_p = gc1.selectbox("分析対象プラン", list(new_plans.keys()), key="s_p_g")
-            with gc1: st.plotly_chart(px.histogram(sr, x=f"{sel_p}_差額", nbins=50, title="影響額分布", color_discrete_sequence=[COLOR_NEW]), use_container_width=True)
-            with gc2: st.plotly_chart(px.scatter(sr.sample(min(len(sr),1000)), x='使用量', y=['現行料金', sel_p], title="価格プロット(サンプル1000件)", opacity=0.6), use_container_width=True)
-            st.dataframe(pd.DataFrame(summ_list).style.format({"売上":"¥{:,.0f}","差額":"¥{:,.0f}","増減率":"{:.2f}%"}), hide_index=True, use_container_width=True)
+            with gc1: st.plotly_chart(px.histogram(sr, x=f"{sel_p}_差額", nbins=50, title="影響額分布", color_discrete_sequence=[COLOR_NEW]), use_container_width=True, key="sim_h")
+            with gc2: st.plotly_chart(px.scatter(sr.sample(min(len(sr),1000)), x='使用量', y=['現行料金', sel_p], title="新旧プロット(サンプル1000件)", opacity=0.6), use_container_width=True, key="sim_s")
+            st.dataframe(pd.DataFrame(summ_list).style.format({"売上総額":"¥{:,.0f}","差額":"¥{:,.0f}","増減率":"{:.2f}%"}), hide_index=True, use_container_width=True)
 
     with tab_analysis:
         st.markdown("##### 需要構成分析")
         sel_p = st.selectbox("比較プラン", list(new_plans.keys()), key="s_p_a")
-        # 境界指紋チェック
+        # 境界指紋判定
         fps = {tid: tuple(sorted(df_master_all[df_master_all['料金表番号']==tid]['MAX'].unique())) for tid in selected_ids}
-        for tid in fps: 
-            l = list(fps[tid]); l[-1] = 999999999.0; fps[tid] = tuple(l)
+        for tid in fps: l = list(fps[tid]); l[-1] = 999999999.0; fps[tid] = tuple(l)
         
         g1, g2 = st.columns(2)
         with g1:
@@ -235,16 +235,16 @@ if file_usage and file_master and selected_ids:
                 m_rep = df_master_all[df_master_all['料金表番号'] == selected_ids[0]].sort_values('MAX').reset_index(drop=True)
                 df_target_usage['現行区画'] = df_target_usage['使用量'].apply(lambda x: get_tier_name(x, m_rep))
                 agg_c = df_target_usage.groupby('現行区画').agg(調定数=('調定数','sum'), 使用量=('使用量','sum')).reset_index()
-                st.plotly_chart(px.pie(agg_c, values='調定数', names='現行区画', hole=0.5, color_discrete_sequence=CHIC_PIE_COLORS), use_container_width=True)
+                st.plotly_chart(px.pie(agg_c, values='調定数', names='現行区画', hole=0.5, color_discrete_sequence=CHIC_PIE_COLORS), use_container_width=True, key="ana_p_c")
                 st.dataframe(agg_c.style.format({"使用量":"{:,.1f}"}), hide_index=True, use_container_width=True)
             else:
-                st.info("複数料金合算のためヒストグラムを表示")
-                st.plotly_chart(px.histogram(df_target_usage, x="使用量", color="料金表番号", nbins=50, color_discrete_sequence=CHIC_PIE_COLORS), use_container_width=True)
+                st.info("混在IDのためヒストグラム表示")
+                st.plotly_chart(px.histogram(df_target_usage, x="使用量", color="料金表番号", nbins=50, color_discrete_sequence=CHIC_PIE_COLORS), use_container_width=True, key="ana_h_c")
         with g2:
             st.markdown(f"**Proposal: {sel_p}**")
             df_target_usage['新区画'] = df_target_usage['使用量'].apply(lambda x: get_tier_name(x, new_plans[sel_p]))
             agg_n = df_target_usage.groupby('新区画').agg(調定数=('調定数','sum'), 使用量=('使用量','sum')).reset_index()
-            st.plotly_chart(px.pie(agg_n, values='調定数', names='新区画', hole=0.5, color_discrete_sequence=CHIC_PIE_COLORS), use_container_width=True)
+            st.plotly_chart(px.pie(agg_n, values='調定数', names='新区画', hole=0.5, color_discrete_sequence=CHIC_PIE_COLORS), use_container_width=True, key="ana_p_n")
             st.dataframe(agg_n.style.format({"使用量":"{:,.1f}"}), hide_index=True, use_container_width=True)
 else:
     st.info("👈 サイドバーからCSVを読み込んでください")
