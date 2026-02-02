@@ -82,7 +82,7 @@ def calculate_bill_single(usage, tariff_df, billing_count=1):
     return int(row['基本料金'] + (usage * row['単位料金']))
 
 # ---------------------------------------------------------
-# 3. UI
+# 3. UI 処理
 # ---------------------------------------------------------
 with st.sidebar:
     st.header("📂 Data Import")
@@ -146,41 +146,49 @@ if file_usage and file_master and selected_ids:
                         st.dataframe(res_df.style.format({"MIN": "{:,.1f}", "MAX": "{:,.1f}", "基本料金": "{:,.2f}", "単位料金": "{:,.2f}"}), hide_index=True)
 
     with t2:
-        if st.button("🚀 計算実行", type="primary"):
+        if st.button("🚀 シミュレーション計算実行", type="primary"):
             res = df_target_usage.copy()
             # 現行料金の計算
             res['現行料金'] = res.apply(lambda r: calculate_bill_single(r['使用量'], df_master_all[df_master_all['料金表番号']==r['料金表番号']], r['調定数']), axis=1)
             # 新プランの計算
             for pn, pdf in new_plans.items():
                 res[pn] = res.apply(lambda r: calculate_bill_single(r['使用量'], pdf, r['調定数']), axis=1)
-                res[f"{pn}_差額"] = res[pn] - res['現行料金']
             st.session_state.simulation_result = res
         
         if st.session_state.simulation_result is not None:
             sr = st.session_state.simulation_result
             total_curr = sr['現行料金'].sum()
-            summ = [{"プラン名":pn, "売上":sr[pn].sum(), "差額":sr[pn].sum()-total_curr} for pn in new_plans]
-            st.dataframe(pd.DataFrame(summ).style.format({"売上":"¥{:,.0f}", "差額":"¥{:,.0f}"}), hide_index=True)
+            summ = []
+            summ.append({"プラン名":"現行 (Current)", "売上総額":total_curr, "差額":0})
+            for pn in new_plans:
+                total_new = sr[pn].sum()
+                summ.append({"プラン名":pn, "売上総額":total_new, "差額":total_new - total_curr})
+            
+            st.markdown("### 収支サマリー")
+            st.dataframe(pd.DataFrame(summ).style.format({"売上総額":"¥{:,.0f}", "差額":"¥{:,.0f}"}), hide_index=True, use_container_width=True)
+            st.markdown("### 詳細データ (Top 100)")
+            st.dataframe(sr.head(100), use_container_width=True)
 
     with t3:
         st.markdown("##### 需要構成分析")
         if ids_consistent:
-            # 統合分析
+            # 統合分析 (代表マスタを使用して全IDを再マッピング)
             master_rep = df_master_all[df_master_all['料金表番号'] == selected_ids[0]].sort_values('MAX').reset_index(drop=True)
             df_target_usage['現行区画'] = df_target_usage['使用量'].apply(lambda x: get_tier_name(x, master_rep))
-            agg_c = df_target_usage.groupby('現行区画').agg(調定数=('調定数','sum'), 使用量=('使用量','sum')).reset_index()
             
-            # 並び替え
+            agg_c = df_target_usage.groupby('現行区画').agg(調定数=('調定数','sum'), 総使用量=('使用量','sum')).reset_index()
+            
+            # 並び替え（マスタの順番を維持）
             l_order = [get_tier_name(r['MAX']-1e-6, master_rep) for _, r in master_rep.iterrows()]
             agg_c['order'] = agg_c['現行区画'].apply(lambda x: l_order.index(x) if x in l_order else 99)
             agg_c = agg_c.sort_values('order').drop(columns='order')
 
             c1, c2 = st.columns(2)
             c1.plotly_chart(px.pie(agg_c, values='調定数', names='現行区画', hole=0.5, color_discrete_sequence=CHIC_PIE_COLORS, title="調定数シェア"), use_container_width=True)
-            c2.plotly_chart(px.pie(agg_c, values='使用量', names='現行区画', hole=0.5, color_discrete_sequence=CHIC_PIE_COLORS, title="使用量シェア"), use_container_width=True)
-            st.dataframe(agg_c.style.format({"使用量":"{:.1f}"}), hide_index=True, use_container_width=True)
+            c2.plotly_chart(px.pie(agg_c, values='総使用量', names='現行区画', hole=0.5, color_discrete_sequence=CHIC_PIE_COLORS, title="使用量シェア"), use_container_width=True)
+            st.dataframe(agg_c.style.format({"総使用量":"{:.1f}"}), hide_index=True, use_container_width=True)
         else:
-            st.warning("境界不一致のため詳細分析不可。個別にIDを選択してください。")
+            st.warning("⚠️ 境界不一致のため詳細分析は非表示です。境界の同じIDのみを選択してください。")
 
 else:
-    st.info("👈 CSVを読み込んでください")
+    st.info("👈 サイドバーからCSVを読み込んでください")
