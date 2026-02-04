@@ -79,73 +79,79 @@ with st.sidebar:
     file_usage = st.file_uploader("1. 使用量CSV (実績)", type=['csv'])
     file_master = st.file_uploader("2. 料金表マスタCSV (定義)", type=['csv'])
 
-if file_usage and file_master:
-    df_usage = smart_load(file_usage)
-    df_master = smart_load(file_master)
+# --- 未アップロード時の案内表示 (ナガセ・カスタム) ---
+if not file_usage or not file_master:
+    st.markdown("---")
+    st.info("👈 サイドバーからCSVを読み込んでください")
+    st.stop()
+
+# --- ファイル読み込み ---
+df_usage = smart_load(file_usage)
+df_master = smart_load(file_master)
+
+if df_usage is not None and df_master is not None:
+    usage_ids = sorted(df_usage['料金表番号'].unique())
+    selected_ids = st.multiselect("料金表番号を選択", usage_ids, default=usage_ids[:1])
+
+    if not selected_ids:
+        st.stop()
+
+    # 指紋チェック
+    fps_check = {}
+    for tid in selected_ids:
+        m_sub = df_master[df_master['料金表番号'] == tid]
+        if not m_sub.empty:
+            f = sorted(m_sub['MAX'].unique())
+            if f: f[-1] = 999999999.0
+            fps_check[tid] = tuple(f)
     
-    if df_usage is not None and df_master is not None:
-        usage_ids = sorted(df_usage['料金表番号'].unique())
-        selected_ids = st.multiselect("料金表番号を選択", usage_ids, default=usage_ids[:1])
+    if len(set(fps_check.values())) > 1:
+        st.error("⚠️ 境界線が不一致です。")
+        st.stop()
 
-        if not selected_ids:
-            st.stop()
+    # 集計
+    df_target = df_usage[df_usage['料金表番号'].isin(selected_ids)].copy()
+    master_rep = df_master[df_master['料金表番号'] == selected_ids[0]].sort_values('MAX').reset_index(drop=True)
+    
+    df_target['Current_Tier'] = df_target['使用量'].apply(lambda x: get_tier_name(x, master_rep))
+    
+    agg_df = df_target.groupby('Current_Tier', as_index=False).agg({
+        '調定数': 'sum',
+        '使用量': 'sum'
+    }).rename(columns={'使用量': '総使用量'})
+    
+    agg_df['調定数'] = agg_df['調定数'].astype(float)
+    agg_df['総使用量'] = agg_df['総使用量'].astype(float)
 
-        # 指紋チェック
-        fps_check = {}
-        for tid in selected_ids:
-            m_sub = df_master[df_master['料金表番号'] == tid]
-            if not m_sub.empty:
-                f = sorted(m_sub['MAX'].unique())
-                if f: f[-1] = 999999999.0
-                fps_check[tid] = tuple(f)
+    # 並び順固定
+    order_list = [get_tier_name(r['MAX']-1e-6, master_rep) for _, r in master_rep.iterrows()]
+    agg_df['order'] = agg_df['Current_Tier'].apply(lambda x: order_list.index(x) if x in order_list else 99)
+    agg_df = agg_df.sort_values('order').drop(columns=['order'])
+
+    # --- 表示 ---
+    st.markdown("---")
+    total_count = agg_df['調定数'].sum()
+    total_vol = agg_df['総使用量'].sum()
+    
+    c1, c2, c3 = st.columns(3)
+    c1.metric("合計調定数", f"{total_count:,.0f}")
+    c2.metric("合計使用量", f"{total_vol:,.0f} m³")
+    if total_count > 0:
+        c3.metric("1件あたり平均", f"{total_vol/total_count:.1f} m³")
+
+    if not agg_df.empty and total_count > 0:
+        g1, g2 = st.columns(2)
+        chic_colors = ['#88a0b9', '#aab7b8', '#82e0aa', '#f5b7b1', '#d7bde2', '#f9e79f']
         
-        if len(set(fps_check.values())) > 1:
-            st.error("⚠️ 境界線が不一致です。")
-            st.stop()
+        with g1:
+            fig1 = px.pie(agg_df, values='調定数', names='Current_Tier', hole=0.5, 
+                          color_discrete_sequence=chic_colors, title="調定数シェア")
+            st.plotly_chart(fig1, use_container_width=True)
+        with g2:
+            fig2 = px.pie(agg_df, values='総使用量', names='Current_Tier', hole=0.5, 
+                          color_discrete_sequence=chic_colors, title="使用量シェア")
+            st.plotly_chart(fig2, use_container_width=True)
 
-        # 集計
-        df_target = df_usage[df_usage['料金表番号'].isin(selected_ids)].copy()
-        master_rep = df_master[df_master['料金表番号'] == selected_ids[0]].sort_values('MAX').reset_index(drop=True)
-        
-        df_target['Current_Tier'] = df_target['使用量'].apply(lambda x: get_tier_name(x, master_rep))
-        
-        agg_df = df_target.groupby('Current_Tier', as_index=False).agg({
-            '調定数': 'sum',
-            '使用量': 'sum'
-        }).rename(columns={'使用量': '総使用量'})
-        
-        agg_df['調定数'] = agg_df['調定数'].astype(float)
-        agg_df['総使用量'] = agg_df['総使用量'].astype(float)
-
-        # 並び順固定
-        order_list = [get_tier_name(r['MAX']-1e-6, master_rep) for _, r in master_rep.iterrows()]
-        agg_df['order'] = agg_df['Current_Tier'].apply(lambda x: order_list.index(x) if x in order_list else 99)
-        agg_df = agg_df.sort_values('order').drop(columns=['order'])
-
-        # --- 表示 ---
-        st.markdown("---")
-        total_count = agg_df['調定数'].sum()
-        total_vol = agg_df['総使用量'].sum()
-        
-        c1, c2, c3 = st.columns(3)
-        c1.metric("合計調定数", f"{total_count:,.0f}")
-        c2.metric("合計使用量", f"{total_vol:,.0f} m³")
-        if total_count > 0:
-            c3.metric("1件あたり平均", f"{total_vol/total_count:.1f} m³")
-
-        if not agg_df.empty and total_count > 0:
-            g1, g2 = st.columns(2)
-            chic_colors = ['#88a0b9', '#aab7b8', '#82e0aa', '#f5b7b1', '#d7bde2', '#f9e79f']
-            
-            with g1:
-                fig1 = px.pie(agg_df, values='調定数', names='Current_Tier', hole=0.5, 
-                              color_discrete_sequence=chic_colors, title="調定数シェア")
-                st.plotly_chart(fig1, use_container_width=True)
-            with g2:
-                fig2 = px.pie(agg_df, values='総使用量', names='Current_Tier', hole=0.5, 
-                              color_discrete_sequence=chic_colors, title="使用量シェア")
-                st.plotly_chart(fig2, use_container_width=True)
-
-            agg_df['構成比(調定)'] = (agg_df['調定数'] / total_count * 100).map('{:.1f}%'.format)
-            agg_df['構成比(使用量)'] = (agg_df['総使用量'] / (total_vol if total_vol > 0 else 1) * 100).map('{:.1f}%'.format)
-            st.dataframe(agg_df[['Current_Tier', '調定数', '構成比(調定)', '総使用量', '構成比(使用量)']], hide_index=True, use_container_width=True)
+        agg_df['構成比(調定)'] = (agg_df['調定数'] / total_count * 100).map('{:.1f}%'.format)
+        agg_df['構成比(使用量)'] = (agg_df['総使用量'] / (total_vol if total_vol > 0 else 1) * 100).map('{:.1f}%'.format)
+        st.dataframe(agg_df[['Current_Tier', '調定数', '構成比(調定)', '総使用量', '構成比(使用量)']], hide_index=True, use_container_width=True)
