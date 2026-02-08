@@ -46,8 +46,8 @@ with c_head1:
 if 'simulation_result' not in st.session_state: st.session_state.simulation_result = None
 if 'plan_data' not in st.session_state:
     d_df = pd.DataFrame({'No': [1, 2, 3], '区画名': ['A', 'B', 'C'], '適用上限(m3)': [8.0, 30.0, 99999.0], '単位料金': [500.0, 400.0, 300.0]})
-    st.session_state.plan_data = {i: d_df.copy() for i in range(3)} # 5 -> 3
-    st.session_state.base_a = {i: 1500.0 for i in range(3)} # 5 -> 3
+    st.session_state.plan_data = {i: d_df.copy() for i in range(3)} 
+    st.session_state.base_a = {i: 1500.0 for i in range(3)} 
 
 CHIC_PIE_COLORS = ['#88a0b9', '#aab7b8', '#82e0aa', '#f5b7b1', '#d7bde2', '#f9e79f']
 COLOR_BAR, COLOR_CURRENT, COLOR_NEW = '#34495e', '#95a5a6', '#e67e22'
@@ -169,30 +169,40 @@ if file_usage and file_master and selected_ids:
 
     with tab_design:
         st.markdown("##### 料金プラン設計")
-        plan_tabs = st.tabs([f"Plan {i+1}" for i in range(3)]) # 5 -> 3
+        plan_tabs = st.tabs([f"Plan {i+1}" for i in range(3)]) 
         new_plans = {}
         for i, pt in enumerate(plan_tabs):
             with pt:
                 c1, c2 = st.columns(2)
                 with c1:
+                    # 基本料金入力
                     st.session_state.base_a[i] = st.number_input(f"🖋️ A区画 基本料金", value=st.session_state.base_a[i], key=f"ba_{i}", format="%.2f")
                     bc1, bc2, _ = st.columns([1,1,4])
                     if bc1.button("＋", key=f"add_{i}"):
                         curr = st.session_state.plan_data[i]
                         new_no = len(curr)+1
-                        st.session_state.plan_data[i] = pd.concat([curr, pd.DataFrame({'No':[new_no], '区画名':["ABCDEFGHIJKLMNOPQRSTUVWXYZ"[new_no-1] if new_no<=26 else f"T{new_no}"], '適用上限(m3)':[99999.0], '単位料金':[max(0.0, curr.iloc[-1]['単位料金']-50.0)]})], ignore_index=True); st.rerun()
+                        st.session_state.plan_data[i] = pd.concat([curr, pd.DataFrame({'No':[new_no], '区画名':["ABCDEFGHIJKLMNOPQRSTUVWXYZ"[new_no-1] if new_no<=26 else f"T{new_no}"], '適用上限(m3)':[99999.0], '単位料金':[max(0.0, curr.iloc[-1]['単位料金']-50.0)]})], ignore_index=True)
+                        st.rerun()
                     if bc2.button("－", key=f"del_{i}"):
                         if len(st.session_state.plan_data[i]) > 1:
                             st.session_state.plan_data[i] = st.session_state.plan_data[i].iloc[:-1].copy()
-                            st.session_state.plan_data[i].iloc[-1, 2] = 99999.0; st.rerun()
+                            st.session_state.plan_data[i].iloc[-1, 2] = 99999.0
+                            st.rerun()
                     
-                    edited = st.data_editor(st.session_state.plan_data[i], use_container_width=True, key=f"ed_{i}", 
+                    # 料金表データエディタ（修正ポイント: ステートの直接上書きと競合回避）
+                    edited = st.data_editor(st.session_state.plan_data[i], use_container_width=True, key=f"ed_plan_{i}", 
                                            column_config={"No": st.column_config.NumberColumn(disabled=True), "区画名": st.column_config.TextColumn("🖋️ 区画名"), "適用上限(m3)": st.column_config.NumberColumn("🖋️ 適用上限", format="%.1f"), "単位料金": st.column_config.NumberColumn("🖋️ 単位料金", format="%.4f")})
-                    st.session_state.plan_data[i] = edited
+                    
+                    # 編集内容に差異がある場合のみ反映
+                    if not edited.equals(st.session_state.plan_data[i]):
+                        st.session_state.plan_data[i] = edited
+                        st.rerun()
+
                 with c2:
-                    if not edited.empty:
-                        bases = calculate_slide_rates(st.session_state.base_a[i], edited)
-                        res_df = pd.DataFrame([{"区画名":r['区画名'], "MIN":0.0, "MAX":r['適用上限(m3)'], "基本料金":bases.get(r['No'],0), "単位料金":r['単位料金']} for _, r in edited.iterrows()])
+                    if not st.session_state.plan_data[i].empty:
+                        curr_plan = st.session_state.plan_data[i]
+                        bases = calculate_slide_rates(st.session_state.base_a[i], curr_plan)
+                        res_df = pd.DataFrame([{"区画名":r['区画名'], "MIN":0.0, "MAX":r['適用上限(m3)'], "基本料金":bases.get(r['No'],0), "単位料金":r['単位料金']} for _, r in curr_plan.iterrows()])
                         new_plans[f"Plan_{i+1}"] = res_df
                         st.dataframe(res_df.style.format({"MIN": "{:,.1f}", "MAX": "{:,.1f}", "基本料金": "{:,.2f}", "単位料金": "{:,.4f}"}), hide_index=True, use_container_width=True)
                         st.plotly_chart(px.line(x=list(range(0, 51, 2)), y=[calculate_bill_single(v, res_df) for v in range(0, 51, 2)], height=250), use_container_width=True, key=f"pl_{i}")
@@ -229,7 +239,6 @@ if file_usage and file_master and selected_ids:
     with tab_analysis:
         st.markdown("##### 需要構成分析")
         sel_p = st.selectbox("比較対象", list(new_plans.keys()), key="s_p_a")
-        # 混在自動検知ロジック (維持)
         fps = {tid: tuple(sorted(df_master_all[df_master_all['料金表番号']==tid]['MAX'].unique())) for tid in selected_ids}
         for tid in fps: 
             l = list(fps[tid]); l[-1] = 999999999.0; fps[tid] = tuple(l)
