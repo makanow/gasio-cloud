@@ -42,18 +42,18 @@ with c_head1:
     st.markdown('<div class="main-title"><span style="color:#2c3e50">Gas</span><span style="color:#e74c3c">i</span><span style="color:#3498db">o</span> 計算機</div>', unsafe_allow_html=True)
     st.markdown('<div class="sub-title">Cloud Edition - Rate Simulation System</div>', unsafe_allow_html=True)
 
-# --- ステート管理 ---
+# --- ステート管理 (ここを3プランに修正) ---
 if 'simulation_result' not in st.session_state: st.session_state.simulation_result = None
 if 'plan_data' not in st.session_state:
     d_df = pd.DataFrame({'No': [1, 2, 3], '区画名': ['A', 'B', 'C'], '適用上限(m3)': [8.0, 30.0, 99999.0], '単位料金': [500.0, 400.0, 300.0]})
-    st.session_state.plan_data = {i: d_df.copy() for i in range(3)}
-    st.session_state.base_a = {i: 1500.0 for i in range(3)}
+    st.session_state.plan_data = {i: d_df.copy() for i in range(3)} # 5 -> 3
+    st.session_state.base_a = {i: 1500.0 for i in range(3)} # 5 -> 3
 
 CHIC_PIE_COLORS = ['#88a0b9', '#aab7b8', '#82e0aa', '#f5b7b1', '#d7bde2', '#f9e79f']
 COLOR_BAR, COLOR_CURRENT, COLOR_NEW = '#34495e', '#95a5a6', '#e67e22'
 
 # ---------------------------------------------------------
-# 2. 関数定義
+# 2. 関数定義 (実務ロジック維持)
 # ---------------------------------------------------------
 def normalize_columns(df):
     rename_map = {'基本':'基本料金','基礎料金':'基本料金','Base':'基本料金','上限':'MAX','適用上限':'MAX','ID':'料金表番号','Usage':'使用量','調定':'調定数'}
@@ -169,7 +169,7 @@ if file_usage and file_master and selected_ids:
 
     with tab_design:
         st.markdown("##### 料金プラン設計")
-        plan_tabs = st.tabs([f"Plan {i+1}" for i in range(3)])
+        plan_tabs = st.tabs([f"Plan {i+1}" for i in range(3)]) # 5 -> 3
         new_plans = {}
         for i, pt in enumerate(plan_tabs):
             with pt:
@@ -223,23 +223,13 @@ if file_usage and file_master and selected_ids:
             gc1, gc2 = st.columns(2)
             sel_p = gc1.selectbox("詳細分析プランを選択", list(new_plans.keys()), key="s_p_g")
             with gc1: st.plotly_chart(px.histogram(sr, x=f"{sel_p}_差額", nbins=50, title="影響額分布", color_discrete_sequence=[COLOR_NEW]), use_container_width=True)
-            with gc2: 
-                # --- 新旧料金プロットの最適化修正 ---
-                plot_df = sr.sample(min(len(sr),1000)).copy()
-                plot_df['料金表番号'] = plot_df['料金表番号'].astype(str)
-                melt_df = plot_df.melt(id_vars=['使用量', '料金表番号'], value_vars=['現行料金', sel_p], var_name='料金種別', value_name='金額')
-                st.plotly_chart(px.scatter(melt_df, x='使用量', y='金額', 
-                                           color='料金種別', 
-                                           symbol='料金表番号', 
-                                           title="新旧料金プロット(1000件・プラン比較)", 
-                                           opacity=0.6,
-                                           color_discrete_map={'現行料金': COLOR_CURRENT, sel_p: COLOR_NEW}), 
-                                use_container_width=True)
+            with gc2: st.plotly_chart(px.scatter(sr.sample(min(len(sr),1000)), x='使用量', y=['現行料金', sel_p], title="新旧料金プロット(1000件)", opacity=0.6), use_container_width=True)
             st.dataframe(pd.DataFrame(summ_list).style.format({"売上総額":"¥{:,.0f}","差額":"¥{:,.0f}","増減率":"{:.2f}%"}), hide_index=True, use_container_width=True)
 
     with tab_analysis:
         st.markdown("##### 需要構成分析")
         sel_p = st.selectbox("比較対象", list(new_plans.keys()), key="s_p_a")
+        # 混在自動検知ロジック (維持)
         fps = {tid: tuple(sorted(df_master_all[df_master_all['料金表番号']==tid]['MAX'].unique())) for tid in selected_ids}
         for tid in fps: 
             l = list(fps[tid]); l[-1] = 999999999.0; fps[tid] = tuple(l)
