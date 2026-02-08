@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import numpy as np
+import io
 
 # ---------------------------------------------------------
 # 1. 設定 & デザイン (Gasio Style)
@@ -31,8 +32,20 @@ if 'plan_data' not in st.session_state:
 # ---------------------------------------------------------
 # 2. 関数定義
 # ---------------------------------------------------------
+def smart_read_csv(file):
+    """文字コードを自動判別して読み込むロジック"""
+    encodings = ['utf-8-sig', 'cp932', 'utf-8', 'shift_jis']
+    for enc in encodings:
+        try:
+            file.seek(0)
+            return pd.read_csv(file, encoding=enc)
+        except (UnicodeDecodeError, pd.errors.ParserError):
+            continue
+    return None
+
 def normalize_columns(df):
-    rename_map = {'基本':'基本料金','基礎料金':'基本料金','ID':'料金表番号','Usage':'使用量','調定':'調定数','適用上限':'MAX'}
+    if df is None: return None
+    rename_map = {'基本':'基本料金','基礎料金':'基本料金','ID':'料金表番号','Usage':'使用量','調定':'調定数','適用上限':'MAX', '適用上限(m3)':'MAX'}
     df = df.rename(columns=rename_map)
     for c in ['使用量', 'MAX', '調定数']:
         if c in df.columns: df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0 if c!='MAX' else 999999999.0)
@@ -54,7 +67,8 @@ def calculate_slide_rates(base_a, blocks_df):
 def calculate_bill_single(usage, tariff_df, billing_count=1):
     if billing_count == 0 or tariff_df.empty: return 0
     df = tariff_df.copy()
-    df['MAX'] = pd.to_numeric(df.get('MAX', df.get('適用上限(m3)')), errors='coerce').fillna(999999999.0)
+    if '適用上限(m3)' in df.columns: df = df.rename(columns={'適用上限(m3)':'MAX'})
+    df['MAX'] = pd.to_numeric(df['MAX'], errors='coerce').fillna(999999999.0)
     target = df[df['MAX'] >= (usage - 1e-9)].sort_values('MAX')
     row = target.iloc[0] if not target.empty else df.sort_values('MAX').iloc[-1]
     return int(row.get('基本料金', 0) + (usage * row['単位料金']))
@@ -73,57 +87,53 @@ with st.sidebar:
     
     selected_ids = []
     if file_master:
-        df_master_all = normalize_columns(pd.read_csv(file_master, encoding='cp932'))
-        u_ids = sorted(df_master_all['料金表番号'].unique())
-        selected_ids = st.multiselect("対象料金表", u_ids, default=u_ids)
+        df_master_all = normalize_columns(smart_read_csv(file_master))
+        if df_master_all is not None:
+            u_ids = sorted(df_master_all['料金表番号'].unique())
+            selected_ids = st.multiselect("対象料金表", u_ids, default=u_ids)
 
 # ---------------------------------------------------------
 # 4. メインエリア
 # ---------------------------------------------------------
 if file_usage and file_master and selected_ids:
-    df_usage = normalize_columns(pd.read_csv(file_usage, encoding='cp932'))
-    df_target_usage = df_usage[df_usage['料金表番号'].isin(selected_ids)].copy()
-    
-    tab_design, tab_sim = st.tabs(["Design", "Simulation"])
-
-    with tab_design:
-        new_plans = {}
-        for i in range(3):
-            st.session_state.base_a[i] = st.number_input(f"Plan {i+1} A区画 基本料金", value=st.session_state.base_a[i], key=f"ba_{i}")
-            edited = st.data_editor(st.session_state.plan_data[i], use_container_width=True, key=f"ed_{i}")
-            st.session_state.plan_data[i] = edited
-            bases = calculate_slide_rates(st.session_state.base_a[i], edited)
-            new_plans[f"Plan_{i+1}"] = pd.DataFrame([{"区画名":r['区画名'], "MAX":r['適用上限(m3)'], "基本料金":bases.get(r['No'],0), "単位料金":r['単位料金']} for _, r in edited.iterrows()])
-
-    with tab_sim:
-        if st.button("🚀 計算実行", type="primary"):
-            res = df_target_usage.copy()
-            res['現行料金'] = res.apply(lambda r: calculate_bill_single(r['使用量'], df_master_all[df_master_all['料金表番号']==r['料金表番号']], r['調定数']), axis=1)
-            for pn, pdf in new_plans.items():
-                res[pn] = res.apply(lambda r: calculate_bill_single(r['使用量'], pdf, r['調定数']), axis=1)
-            st.session_state.simulation_result = res
+    df_usage = normalize_columns(smart_read_csv(file_usage))
+    if df_usage is not None:
+        df_target_usage = df_usage[df_usage['料金表番号'].isin(selected_ids)].copy()
         
-        if st.session_state.simulation_result is not None:
-            sr = st.session_state.simulation_result
-            sel_p = st.selectbox("比較対象プラン", list(new_plans.keys()))
-            
-            # --- 改善の核: 差額（影響額）の計算 ---
-            sr['影響額'] = sr[sel_p] - sr['現行料金']
-            
-            total_diff = sr['影響額'].sum()
-            col1, col2 = st.columns(2)
-            col1.metric("総影響額（売上増減）", f"¥{total_diff:,.0f}")
-            col2.metric("平均影響額（一人あたり）", f"¥{sr['影響額'].mean():,.0f}")
+        tab_design, tab_sim = st.tabs(["Design", "Simulation"])
 
-            gc1, gc2 = st.columns(2)
-            with gc1:
-                # 横軸を「影響額」にした本当のヒストグラム
-                fig_hist = px.histogram(sr, x="影響額", title="顧客別 影響額分布 (新－旧)", 
-                                        labels={'影響額': '負担増減額 (円)'},
-                                        color_discrete_sequence=['#e67e22'])
-                fig_hist.add_vline(x=0, line_dash="dash", line_color="black") # 0円のライン
-                st.plotly_chart(fig_hist, use_container_width=True)
-            with gc2:
-                st.plotly_chart(px.scatter(sr.sample(min(len(sr),1000)), x='使用量', y='影響額', title="使用量別 影響インパクト"), use_container_width=True)
+        with tab_design:
+            new_plans = {}
+            for i in range(3):
+                st.session_state.base_a[i] = st.number_input(f"Plan {i+1} A区画 基本料金", value=st.session_state.base_a[i], key=f"ba_{i}")
+                edited = st.data_editor(st.session_state.plan_data[i], use_container_width=True, key=f"ed_{i}")
+                st.session_state.plan_data[i] = edited
+                bases = calculate_slide_rates(st.session_state.base_a[i], edited)
+                new_plans[f"Plan_{i+1}"] = pd.DataFrame([{"区画名":r['区画名'], "適用上限(m3)":r['適用上限(m3)'], "基本料金":bases.get(r['No'],0), "単位料金":r['単位料金']} for _, r in edited.iterrows()])
+
+        with tab_sim:
+            if st.button("🚀 計算実行", type="primary"):
+                res = df_target_usage.copy()
+                res['現行料金'] = res.apply(lambda r: calculate_bill_single(r['使用量'], df_master_all[df_master_all['料金表番号']==r['料金表番号']], r['調定数']), axis=1)
+                for pn, pdf in new_plans.items():
+                    res[pn] = res.apply(lambda r: calculate_bill_single(r['使用量'], pdf, r['調定数']), axis=1)
+                st.session_state.simulation_result = res
+            
+            if st.session_state.simulation_result is not None:
+                sr = st.session_state.simulation_result
+                sel_p = st.selectbox("比較対象プラン", list(new_plans.keys()))
+                sr['影響額'] = sr[sel_p] - sr['現行料金']
+                
+                col1, col2 = st.columns(2)
+                col1.metric("総影響額", f"¥{sr['影響額'].sum():,.0f}")
+                col2.metric("平均影響額", f"¥{sr['影響額'].mean():,.0f}")
+
+                gc1, gc2 = st.columns(2)
+                with gc1:
+                    fig_hist = px.histogram(sr, x="影響額", title="顧客別 影響額分布", labels={'影響額': '負担増減額 (円)'})
+                    fig_hist.add_vline(x=0, line_dash="dash", line_color="black")
+                    st.plotly_chart(fig_hist, use_container_width=True)
+                with gc2:
+                    st.plotly_chart(px.scatter(sr.sample(min(len(sr),1000)), x='使用量', y='影響額', title="使用量別 影響インパクト"), use_container_width=True)
 else:
     st.info("👈 サイドバーからCSVをアップロードしてください")
