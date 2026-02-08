@@ -224,12 +224,17 @@ if file_usage and file_master and selected_ids:
             sel_p = gc1.selectbox("詳細分析プランを選択", list(new_plans.keys()), key="s_p_g")
             with gc1: st.plotly_chart(px.histogram(sr, x=f"{sel_p}_差額", nbins=50, title="影響額分布", color_discrete_sequence=[COLOR_NEW]), use_container_width=True)
             with gc2: 
-                # --- 新旧料金プロットの色分け修正 ---
+                # --- 新旧料金プロットの最適化修正 ---
                 plot_df = sr.sample(min(len(sr),1000)).copy()
-                plot_df['料金表番号'] = plot_df['料金表番号'].astype(str) # カテゴリとして扱う
-                # 現行料金と選択プランを比較するためにLong形式に変換
+                plot_df['料金表番号'] = plot_df['料金表番号'].astype(str)
                 melt_df = plot_df.melt(id_vars=['使用量', '料金表番号'], value_vars=['現行料金', sel_p], var_name='料金種別', value_name='金額')
-                st.plotly_chart(px.scatter(melt_df, x='使用量', y='金額', color='料金表番号', symbol='料金種別', title="新旧料金プロット(1000件・料金表別)", opacity=0.6), use_container_width=True)
+                st.plotly_chart(px.scatter(melt_df, x='使用量', y='金額', 
+                                           color='料金種別', 
+                                           symbol='料金表番号', 
+                                           title="新旧料金プロット(1000件・プラン比較)", 
+                                           opacity=0.6,
+                                           color_discrete_map={'現行料金': COLOR_CURRENT, sel_p: COLOR_NEW}), 
+                                use_container_width=True)
             st.dataframe(pd.DataFrame(summ_list).style.format({"売上総額":"¥{:,.0f}","差額":"¥{:,.0f}","増減率":"{:.2f}%"}), hide_index=True, use_container_width=True)
 
     with tab_analysis:
