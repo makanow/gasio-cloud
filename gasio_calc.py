@@ -59,6 +59,7 @@ def stabilize_dataframe(df, base_a):
 # ---------------------------------------------------------
 
 if 'calc_data' not in st.session_state:
+    # 指示通り、適用上限の初期値を 8.0, 30.0, 99999.0 に変更
     init_df = pd.DataFrame([
         {'No': 1, '区画名': 'A', '適用上限(m3)': 8.0, '単位料金(入力)': 650.0},
         {'No': 2, '区画名': 'B', '適用上限(m3)': 30.0, '単位料金(入力)': 550.0},
@@ -84,7 +85,7 @@ with tab1:
                 "区画名": st.column_config.TextColumn("🔒 区画", disabled=True, width=60),
                 "適用上限(m3)": st.column_config.NumberColumn("✏️ 適用上限", format="%.1f"),
                 "単位料金(入力)": st.column_config.NumberColumn("✏️ 単位料金", format="%.2f"),
-                "基本料金(算出)": st.column_config.NumberColumn("📊 基本料金(自算)", disabled=True, format="%.2f") # 小数第2位指定
+                "基本料金(算出)": st.column_config.NumberColumn("📊 基本料金(自算)", disabled=True, format="%.2f")
             },
             num_rows="dynamic",
             use_container_width=True,
@@ -100,7 +101,6 @@ with tab1:
         st.markdown("##### 2. 計算結果 (Result)")
         display_df = st.session_state.calc_data.copy()
         
-        # 指示通り、単位料金を基本料金の前に配置
         target_cols = ['区画名', '適用上限(m3)', '単位料金(入力)', '基本料金(算出)']
         available_cols = [c for c in target_cols if c in display_df.columns]
         
@@ -109,7 +109,7 @@ with tab1:
                 display_df.set_index('No')[available_cols].style.format({
                     '適用上限(m3)': "{:,.1f}",
                     '単位料金(入力)': "{:,.2f}",
-                    '基本料金(算出)': "{:,.2f}" # 小数第2位指定
+                    '基本料金(算出)': "{:,.2f}"
                 }, na_rep="-"), 
                 use_container_width=True
             )
