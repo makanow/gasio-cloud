@@ -15,7 +15,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.markdown('<div class="main-title">Gasio 電卓</div>', unsafe_allow_html=True)
-st.markdown('<div class="sub-title">Rate Design Solver (Fail-Safe Build)</div>', unsafe_allow_html=True)
+st.markdown('<div class="sub-title">Rate Design Solver (Clean & Minimal Build)</div>', unsafe_allow_html=True)
 
 # ---------------------------------------------------------
 # 2. ロジック (アルファベット生成 & 算出)
@@ -31,14 +31,11 @@ def get_alpha_label(n):
 def solve_base(df, base_a):
     if df.empty: return {}
     sorted_df = df.sort_values('No')
-    # 第1区画のNoを取得
     first_no = sorted_df.iloc[0]['No']
     bases = {first_no: base_a}
-    
     for i in range(1, len(sorted_df)):
         prev = sorted_df.iloc[i-1]
         curr = sorted_df.iloc[i]
-        # 理論式: base_curr = base_prev + (unit_prev - unit_curr) * limit_prev
         bases[curr['No']] = bases[prev['No']] + (prev['単位料金(入力)'] - curr['単位料金(入力)']) * prev['適用上限(m3)']
     return bases
 
@@ -47,30 +44,22 @@ def stabilize_dataframe(df, base_a):
     if df is None or len(df) == 0:
         return pd.DataFrame(columns=['No', '区画名', '適用上限(m3)', '単位料金(入力)', '基本料金(算出)'])
     
-    # 物理行に基づきNoと区画名を振り直し
     df = df.reset_index(drop=True)
     df['No'] = range(1, len(df) + 1)
     df['区画名'] = [get_alpha_label(i) for i in range(len(df))]
-    
-    # 数値変換の強制
     df['適用上限(m3)'] = pd.to_numeric(df['適用上限(m3)'], errors='coerce').fillna(0.0)
     df['単位料金(入力)'] = pd.to_numeric(df['単位料金(入力)'], errors='coerce').fillna(0.0)
-    
-    # 最終行の適用上限を 99999.0 に固定
     df.loc[df.index[-1], '適用上限(m3)'] = 99999.0
     
-    # 基本料金の算出
     res_bases = solve_base(df, base_a)
     df['基本料金(算出)'] = df['No'].map(res_bases)
-    
     return df
 
 # ---------------------------------------------------------
-# 3. メイン UI (ステート管理)
+# 3. メイン UI
 # ---------------------------------------------------------
 
 if 'calc_data' not in st.session_state:
-    # 初回起動時のマスタデータ構築
     init_df = pd.DataFrame([
         {'No': 1, '区画名': 'A', '適用上限(m3)': 8.0, '単位料金(入力)': 650.0},
         {'No': 2, '区画名': 'B', '適用上限(m3)': 30.0, '単位料金(入力)': 550.0},
@@ -89,7 +78,6 @@ with tab1:
         st.markdown("##### 1. パラメータ入力 (Input)")
         base_a_fwd = st.number_input("✏️ 第1区画(A) 基本料金", value=float(st.session_state.last_base_a), step=10.0)
         
-        # エディタの表示。計算結果列も表示に含める
         edited_df = st.data_editor(
             st.session_state.calc_data,
             column_config={
@@ -97,14 +85,13 @@ with tab1:
                 "区画名": st.column_config.TextColumn("🔒 区画", disabled=True, width=60),
                 "適用上限(m3)": st.column_config.NumberColumn("✏️ 適用上限", format="%.1f"),
                 "単位料金(入力)": st.column_config.NumberColumn("✏️ 単位料金", format="%.2f"),
-                "基本料金(算出)": st.column_config.NumberColumn("📊 基本料金(自算)", disabled=True, format="¥ %d")
+                "基本料金(算出)": st.column_config.NumberColumn("📊 基本料金(自算)", disabled=True, format="%d") # ¥マークを削除 
             },
             num_rows="dynamic",
             use_container_width=True,
             key="main_editor"
         )
         
-        # 更新判定。基本料金の変更、またはデータの増減・変更があった場合
         if base_a_fwd != st.session_state.last_base_a or not edited_df.equals(st.session_state.calc_data):
             st.session_state.last_base_a = base_a_fwd
             st.session_state.calc_data = stabilize_dataframe(edited_df, base_a_fwd)
@@ -112,20 +99,19 @@ with tab1:
 
     with c2:
         st.markdown("##### 2. 計算結果 (Result)")
-        # 安全なコピーと列存在チェック
         display_df = st.session_state.calc_data.copy()
         
-        # KeyError対策: 確実に列が存在することを確認してから抽出
         target_cols = ['区画名', '適用上限(m3)', '基本料金(算出)', '単位料金(入力)']
         available_cols = [c for c in target_cols if c in display_df.columns]
         
         if not display_df.empty:
-            # 空白行が出ないよう、インデックスをNoにして数値列のみをフォーマット
+            # ¥マークを削除し、行数に合わせて高さを自動調整 (height=None or hide_index)
             st.dataframe(
                 display_df.set_index('No')[available_cols].style.format({
                     '適用上限(m3)': "{:,.1f}",
-                    '基本料金(算出)': "{:,.0f}",
+                    '基本料金(算出)': "{:,.0f}", # ¥マークを削除 
                     '単位料金(入力)': "{:,.2f}"
                 }, na_rep="-"), 
-                use_container_width=True, height=400
+                use_container_width=True
+                # 固定のheightを削除し、内容に合わせて伸縮させることで空白行を排除
             )
