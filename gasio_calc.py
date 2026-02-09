@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 
 # ---------------------------------------------------------
-# 1. 設定 & デザイン (Gasio Style)
+# 1. 設定 & デザイン
 # ---------------------------------------------------------
 st.set_page_config(page_title="Gasio 電卓", page_icon="🧮", layout="wide")
 
@@ -15,10 +15,10 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.markdown('<div class="main-title">Gasio 電卓</div>', unsafe_allow_html=True)
-st.markdown('<div class="sub-title">Rate Design Solver (Clean & Minimal Build)</div>', unsafe_allow_html=True)
+st.markdown('<div class="sub-title">Rate Design Solver (Specification Compliant)</div>', unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# 2. ロジック (アルファベット生成 & 算出)
+# 2. ロジック
 # ---------------------------------------------------------
 
 def get_alpha_label(n):
@@ -40,7 +40,6 @@ def solve_base(df, base_a):
     return bases
 
 def stabilize_dataframe(df, base_a):
-    """データのクレンジングと採番、算出結果の統合"""
     if df is None or len(df) == 0:
         return pd.DataFrame(columns=['No', '区画名', '適用上限(m3)', '単位料金(入力)', '基本料金(算出)'])
     
@@ -85,7 +84,7 @@ with tab1:
                 "区画名": st.column_config.TextColumn("🔒 区画", disabled=True, width=60),
                 "適用上限(m3)": st.column_config.NumberColumn("✏️ 適用上限", format="%.1f"),
                 "単位料金(入力)": st.column_config.NumberColumn("✏️ 単位料金", format="%.2f"),
-                "基本料金(算出)": st.column_config.NumberColumn("📊 基本料金(自算)", disabled=True, format="%d") # ¥マークを削除 
+                "基本料金(算出)": st.column_config.NumberColumn("📊 基本料金(自算)", disabled=True, format="%.2f") # 小数第2位指定
             },
             num_rows="dynamic",
             use_container_width=True,
@@ -101,17 +100,16 @@ with tab1:
         st.markdown("##### 2. 計算結果 (Result)")
         display_df = st.session_state.calc_data.copy()
         
-        target_cols = ['区画名', '適用上限(m3)', '基本料金(算出)', '単位料金(入力)']
+        # 指示通り、単位料金を基本料金の前に配置
+        target_cols = ['区画名', '適用上限(m3)', '単位料金(入力)', '基本料金(算出)']
         available_cols = [c for c in target_cols if c in display_df.columns]
         
         if not display_df.empty:
-            # ¥マークを削除し、行数に合わせて高さを自動調整 (height=None or hide_index)
             st.dataframe(
                 display_df.set_index('No')[available_cols].style.format({
                     '適用上限(m3)': "{:,.1f}",
-                    '基本料金(算出)': "{:,.0f}", # ¥マークを削除 
-                    '単位料金(入力)': "{:,.2f}"
+                    '単位料金(入力)': "{:,.2f}",
+                    '基本料金(算出)': "{:,.2f}" # 小数第2位指定
                 }, na_rep="-"), 
                 use_container_width=True
-                # 固定のheightを削除し、内容に合わせて伸縮させることで空白行を排除
             )
