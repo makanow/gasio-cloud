@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 
 # ---------------------------------------------------------
-# 1. 設定 & デザイン (Gasio Style)
+# 1. 設定 & デザイン
 # ---------------------------------------------------------
 st.set_page_config(page_title="Gasio 電卓", page_icon="🧮", layout="wide")
 
@@ -15,10 +15,10 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.markdown('<div class="main-title">Gasio 電卓</div>', unsafe_allow_html=True)
-st.markdown('<div class="sub-title">Rate Design Solver (Bug Fixed)</div>', unsafe_allow_html=True)
+st.markdown('<div class="sub-title">Rate Design Solver (Clean Build)</div>', unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# 2. ロジック (アルファベット生成 & 安定化)
+# 2. ロジック
 # ---------------------------------------------------------
 
 def get_alpha_label(n):
@@ -28,93 +28,98 @@ def get_alpha_label(n):
         n = n // 26 - 1
     return label
 
-def stabilize_dataframe(df):
-    """入力値を元に、Noと区画名を物理的に強制上書きする"""
-    if df is None or len(df) == 0:
-        return pd.DataFrame(columns=['No', '区画名', '適用上限(m3)', '単位料金(入力)'])
+def solve_base(df, base_a):
+    """従量料金から各区画の基本料金を算出する"""
+    if df.empty: return {}
+    # インデックスに依存せずNoで管理
+    sorted_df = df.sort_values('No')
+    bases = {sorted_df.iloc[0]['No']: base_a}
     
-    # 行追加・削除に対応してインデックスとNo、区画名を即座に振り直す
+    for i in range(1, len(sorted_df)):
+        prev = sorted_df.iloc[i-1]
+        curr = sorted_df.iloc[i]
+        # 前の基本料金 + (前の単価 - 今の単価) * 前の適用上限
+        bases[curr['No']] = bases[prev['No']] + (prev['単位料金(入力)'] - curr['単位料金(入力)']) * prev['適用上限(m3)']
+    return bases
+
+def stabilize_dataframe(df, base_a):
+    """データのクレンジング、再採番、および基本料金の算出結果を統合する"""
+    if df is None or len(df) == 0:
+        return pd.DataFrame(columns=['No', '区画名', '適用上限(m3)', '単位料金(入力)', '基本料金(算出)'])
+    
+    # 1. 物理的な行順でNoと区画名を振り直す
     df = df.reset_index(drop=True)
     df['No'] = range(1, len(df) + 1)
     df['区画名'] = [get_alpha_label(i) for i in range(len(df))]
     
-    # 数値変換の強制 (None/NaN対策)
+    # 2. 数値変換の強制
     df['適用上限(m3)'] = pd.to_numeric(df['適用上限(m3)'], errors='coerce').fillna(0.0)
     df['単位料金(入力)'] = pd.to_numeric(df['単位料金(入力)'], errors='coerce').fillna(0.0)
     
-    # 最終行の固定
+    # 3. 最終行の固定
     df.loc[df.index[-1], '適用上限(m3)'] = 99999.0
+    
+    # 4. 基本料金の計算結果をこのDFに書き込む (パラメータ入力側の表示用)
+    res_bases = solve_base(df, base_a)
+    df['基本料金(算出)'] = df['No'].map(res_bases)
+    
     return df
-
-def solve_base(df, base_a):
-    """従量料金から各区画の基本料金を算出する"""
-    if df.empty: return {}
-    bases = {1: base_a}
-    for i in range(1, len(df)):
-        prev = df.iloc[i-1]
-        curr = df.iloc[i]
-        # 計算式: 前の基本料金 + (前の単価 - 今の単価) * 前の適用上限
-        bases[curr['No']] = bases[prev['No']] + (prev['単位料金(入力)'] - curr['単位料金(入力)']) * prev['適用上限(m3)']
-    return bases
 
 # ---------------------------------------------------------
 # 3. メイン UI
 # ---------------------------------------------------------
 
 if 'calc_data' not in st.session_state:
-    # 初期の3区画設定
     st.session_state.calc_data = pd.DataFrame([
-        {'No': 1, '区画名': 'A', '適用上限(m3)': 8.0, '単位料金(入力)': 500.0},
-        {'No': 2, '区画名': 'B', '適用上限(m3)': 30.0, '単位料金(入力)': 400.0},
-        {'No': 3, '区画名': 'C', '適用上限(m3)': 99999.0, '単位料金(入力)': 300.0}
+        {'No': 1, '区画名': 'A', '適用上限(m3)': 8.0, '単位料金(入力)': 650.0},
+        {'No': 2, '区画名': 'B', '適用上限(m3)': 30.0, '単位料金(入力)': 550.0},
+        {'No': 3, '区画名': 'C', '適用上限(m3)': 99999.0, '単位料金(入力)': 450.0}
     ])
+    # 初回起動時に計算結果を付与
+    st.session_state.calc_data = stabilize_dataframe(st.session_state.calc_data, 1500.0)
 
 tab1, tab2 = st.tabs(["🔄 従量料金基準", "🧮 基本料金基準"])
 
 with tab1:
-    st.info("💡 行を追加すると、即座にNoと区画名が更新されます。最終行の上限は99999に固定されます。")
-    c1, c2 = st.columns([1, 1])
+    st.info("💡 行を追加すると即座にNo・区画名が更新され、基本料金も自動計算されます。")
+    c1, c2 = st.columns([1.1, 0.9])
     
     with c1:
         st.markdown("##### 1. パラメータ入力 (Input)")
-        base_a_fwd = st.number_input("✏️ 第1区画(A) 基本料金", value=1500.0, step=10.0)
+        base_a_fwd = st.number_input("✏️ 第1区画(A) 基本料金", value=1500.0, step=10.0, key="base_input_fwd")
         
-        # 入力エディタ
+        # 編集用エディタ
         edited_df = st.data_editor(
             st.session_state.calc_data,
             column_config={
-                "No": st.column_config.NumberColumn("🔒 No", disabled=True, width=50),
-                "区画名": st.column_config.TextColumn("🔒 区画", disabled=True, width=70),
+                "No": st.column_config.NumberColumn("🔒 No", disabled=True, width=40),
+                "区画名": st.column_config.TextColumn("🔒 区画", disabled=True, width=60),
                 "適用上限(m3)": st.column_config.NumberColumn("✏️ 適用上限", format="%.1f"),
-                "単位料金(入力)": st.column_config.NumberColumn("✏️ 単位料金", format="%.2f")
+                "単位料金(入力)": st.column_config.NumberColumn("✏️ 単位料金", format="%.2f"),
+                "基本料金(算出)": st.column_config.NumberColumn("📊 基本料金(自算)", disabled=True, format="¥ %d")
             },
             num_rows="dynamic",
             use_container_width=True,
-            key="gas_editor"
+            key="main_editor"
         )
         
-        # 変更があれば再採番と再計算を実行
-        if len(edited_df) != len(st.session_state.calc_data) or not edited_df.equals(st.session_state.calc_data):
-            st.session_state.calc_data = stabilize_dataframe(edited_df)
+        # 変更検知 (値の変更または基本料金の入力変更)
+        if not edited_df.equals(st.session_state.calc_data) or base_a_fwd != st.session_state.get('last_base_a', 1500.0):
+            st.session_state.last_base_a = base_a_fwd
+            st.session_state.calc_data = stabilize_dataframe(edited_df, base_a_fwd)
             st.rerun()
 
     with c2:
         st.markdown("##### 2. 計算結果 (Result)")
-        res_df = st.session_state.calc_data.copy()
-        if not res_df.empty:
-            res_bases = solve_base(res_df, base_a_fwd)
-            res_df['基本料金(算出)'] = res_df['No'].map(res_bases)
-            
-            # 列の表示順を整える
-            display_df = res_df[['No', '区画名', '適用上限(m3)', '基本料金(算出)', '単位料金(入力)']].copy()
-            display_df.columns = ['No', '区画名', '適用上限', '基本料金(算出)', '単位料金']
-            
-            # エラー対策: 数値列のみを指定してフォーマットを適用
-            st.dataframe(
-                display_df.set_index('No').style.format({
-                    '適用上限': "{:,.1f}",
-                    '基本料金(算出)': "{:,.2f}",
-                    '単位料金': "{:,.2f}"
-                }), 
-                use_container_width=True, height=400
-            )
+        # 無駄な空白行（未入力行）を排除して表示
+        display_df = st.session_state.calc_data.copy()
+        
+        # 数値列をターゲットにフォーマットを適用
+        st.dataframe(
+            display_df.set_index('No')[['区画名', '適用上限(m3)', '基本料金(算出)', '単位料金(入力)']].style.format({
+                '適用上限(m3)': "{:,.1f}",
+                '基本料金(算出)': "{:,.0f}",
+                '単位料金(入力)': "{:,.2f}"
+            }), 
+            use_container_width=True, height=400
+        )
