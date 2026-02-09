@@ -71,7 +71,7 @@ if 'calc_data' not in st.session_state:
 tab1, tab2 = st.tabs(["🔄 従量料金基準", "🧮 基本料金基準"])
 
 with tab1:
-    st.info("💡 操作ガイド: 行の追加/削除に連動して自動計算されます。空白行は表示されません。")
+    st.info("💡 操作ガイド: 行の追加/削除に連動して自動計算されます。")
     c1, c2 = st.columns([1.1, 0.9])
     
     with c1:
