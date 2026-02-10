@@ -2,23 +2,34 @@ import streamlit as st
 import pandas as pd
 
 # ---------------------------------------------------------
-# 1. 設定 & デザイン (Gasio Style)
+# 1. 設定 & デザイン (Gasio Logo Style)
 # ---------------------------------------------------------
-st.set_page_config(page_title="Gasio 電卓", page_icon="🧮", layout="wide")
+st.set_page_config(page_title="Gasio 計算機", page_icon="🧮", layout="wide")
 
 st.markdown("""
     <style>
     .block-container { padding-top: 2rem; }
-    .main-title { font-size: 3rem; font-weight: 800; color: #2c3e50; margin-bottom: 0; }
-    .sub-title { font-size: 1.2rem; color: #7f8c8d; border-bottom: 2px solid #e74c3c; padding-bottom: 10px; margin-bottom: 20px;}
+    /* ロゴスタイルのタイトル */
+    .logo-text { font-size: 3.5rem; font-weight: 800; font-family: 'Arial Black', sans-serif; margin-bottom: 0; }
+    .gas-text { color: #2c3e50; }
+    .i-text { color: #e74c3c; }
+    .o-text { color: #3498db; }
+    .kanji-text { color: #2c3e50; margin-left: 10px; }
+    
+    .sub-title { font-size: 1.2rem; color: #7f8c8d; border-bottom: 3px solid #3498db; padding-bottom: 10px; margin-bottom: 20px;}
     </style>
 """, unsafe_allow_html=True)
 
-st.markdown('<div class="main-title">Gasio 電卓</div>', unsafe_allow_html=True)
-st.markdown('<div class="sub-title">Rate Design Solver (Robust Format Build)</div>', unsafe_allow_html=True)
+# 最新のロゴデザインに基づいたヘッダー
+st.markdown("""
+    <div class="logo-text">
+        <span class="gas-text">Gas</span><span class="i-text">i</span><span class="o-text">o</span><span class="kanji-text">計算機</span>
+    </div>
+""", unsafe_allow_html=True)
+st.markdown('<div class="sub-title">Cloud Edition - Rate Simulation System</div>', unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# 2. ロジック (算出ロジック)
+# 2. ロジック (アルファベット生成 & 算出)
 # ---------------------------------------------------------
 
 def get_alpha_label(n):
@@ -46,13 +57,12 @@ def solve_unit(df, unit_a):
     for i in range(1, len(sorted_df)):
         prev, curr = sorted_df.iloc[i-1], sorted_df.iloc[i]
         if prev['適用上限(m3)'] != 0:
-            units[curr['No']] = units[prev['No']] - (curr['基本料金(入力)'] - prev['基本料金(入力)']) / prev['適用上限(m3)']
+            units[curr['No']] = units[prev['No']] - (curr['基本料金(入力)'] - prev['基本料金(入力)']) * prev['適用上限(m3)']
         else:
             units[curr['No']] = units[prev['No']]
     return units
 
 def stabilize_dataframe(df, start_val, mode='fwd'):
-    """全てのカラムを数値化・補完し、モードに応じて再計算する"""
     if df is None or len(df) == 0:
         return pd.DataFrame(columns=['No', '区画名', '適用上限(m3)', '単位料金(入力)', '基本料金(入力)', '基本料金(算出)', '単位料金(算出)'])
     
@@ -82,17 +92,17 @@ def stabilize_dataframe(df, start_val, mode='fwd'):
 # ---------------------------------------------------------
 
 if 'calc_data' not in st.session_state:
-    st.session_state.calc_data = pd.DataFrame([
+    init_df = pd.DataFrame([
         {'No': 1, '区画名': 'A', '適用上限(m3)': 8.0, '単位料金(入力)': 650.0, '基本料金(入力)': 1500.0},
         {'No': 2, '区画名': 'B', '適用上限(m3)': 30.0, '単位料金(入力)': 550.0, '基本料金(入力)': 2300.0},
         {'No': 3, '区画名': 'C', '適用上限(m3)': 99999.0, '単位料金(入力)': 450.0, '基本料金(入力)': 5300.0}
     ])
+    st.session_state.calc_data = init_df
     st.session_state.last_base_a = 1500.0
     st.session_state.last_unit_a = 650.0
 
 tab1, tab2 = st.tabs(["🔄 従量料金基準", "🧮 基本料金基準"])
 
-# --- Tab 1: 従量料金基準 ---
 with tab1:
     st.info("💡 操作ガイド: 単位料金を入力すると基本料金が自動計算されます。")
     c1, c2 = st.columns([1.1, 0.9])
@@ -123,7 +133,6 @@ with tab1:
     with c2:
         st.markdown("##### 2. 計算結果 (Result)")
         if not edited_fwd.empty:
-            # 安全なフォーマット適用: 数値列のみを指定
             st.dataframe(
                 edited_fwd.set_index('No')[['区画名', '適用上限(m3)', '単位料金(入力)', '基本料金(算出)']].style.format({
                     '適用上限(m3)': "{:,.1f}",
@@ -133,7 +142,6 @@ with tab1:
                 use_container_width=True
             )
 
-# --- Tab 2: 基本料金基準 ---
 with tab2:
     st.info("💡 操作ガイド: 基本料金を入力すると単位料金が自動計算されます。")
     c1, c2 = st.columns([1.1, 0.9])
@@ -164,7 +172,6 @@ with tab2:
     with c2:
         st.markdown("##### 2. 計算結果 (Result)")
         if not edited_rev.empty:
-            # 安全なフォーマット適用: 数値列のみを指定
             st.dataframe(
                 edited_rev.set_index('No')[['区画名', '適用上限(m3)', '単位料金(算出)', '基本料金(入力)']].style.format({
                     '適用上限(m3)': "{:,.1f}",
