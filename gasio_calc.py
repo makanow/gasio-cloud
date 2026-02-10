@@ -23,7 +23,7 @@ st.markdown("""
 # 最新のロゴデザインに基づいたヘッダー
 st.markdown("""
     <div class="logo-text">
-        <span class="gas-text">Gas</span><span class="i-text">i</span><span class="o-text">o</span><span class="kanji-text">計算機</span>
+        <span class="gas-text">Gas</span><span class="i-text">i</span><span class="o-text">o</span><span class="kanji-text">電卓</span>
     </div>
 """, unsafe_allow_html=True)
 st.markdown('<div class="sub-title">Cloud Edition - Rate Simulation System</div>', unsafe_allow_html=True)
