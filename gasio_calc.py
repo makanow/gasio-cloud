@@ -4,7 +4,7 @@ import pandas as pd
 # ---------------------------------------------------------
 # 1. 設定 & デザイン (Gasio mini Style 移植)
 # ---------------------------------------------------------
-st.set_page_config(page_title="Gasio 計算機", page_icon="🧮", layout="wide")
+st.set_page_config(page_title="Gasio 電卓", page_icon="🧮", layout="wide")
 
 st.markdown("""
     <style>
@@ -16,8 +16,8 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# ロゴの文字色修復: i(赤), o(青) + 「計算機」の日本語タイトル
-st.markdown('<div class="main-title"><span style="color:#2c3e50">Gas</span><span style="color:#e74c3c">i</span><span style="color:#3498db">o</span> <span style="color:#2c3e50">計算機</span></div>', unsafe_allow_html=True)
+# ロゴの文字色修復: i(赤), o(青) + 「電卓」の日本語タイトル
+st.markdown('<div class="main-title"><span style="color:#2c3e50">Gas</span><span style="color:#e74c3c">i</span><span style="color:#3498db">o</span> <span style="color:#2c3e50">電卓</span></div>', unsafe_allow_html=True)
 st.markdown('<div class="sub-title">Rate Design Solver (Integrated Stable Build)</div>', unsafe_allow_html=True)
 
 # ---------------------------------------------------------
