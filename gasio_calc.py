@@ -4,7 +4,7 @@ import pandas as pd
 # ---------------------------------------------------------
 # 1. 設定 & デザイン (Gasio Logo Style)
 # ---------------------------------------------------------
-st.set_page_config(page_title="Gasio 計算機", page_icon="🧮", layout="wide")
+st.set_page_config(page_title="Gasio 電卓", page_icon="🧮", layout="wide")
 
 st.markdown("""
     <style>
