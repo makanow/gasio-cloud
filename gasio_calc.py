@@ -15,10 +15,10 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.markdown('<div class="main-title">Gasio 電卓</div>', unsafe_allow_html=True)
-st.markdown('<div class="sub-title">Rate Design Solver (Specification Compliant)</div>', unsafe_allow_html=True)
+st.markdown('<div class="sub-title">Rate Design Solver (Dual Mode Build)</div>', unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# 2. ロジック
+# 2. ロジック (アルファベット生成 & 算出)
 # ---------------------------------------------------------
 
 def get_alpha_label(n):
@@ -29,6 +29,7 @@ def get_alpha_label(n):
     return label
 
 def solve_base(df, base_a):
+    """従量料金(単価)から基本料金を導く"""
     if df.empty: return {}
     sorted_df = df.sort_values('No')
     first_no = sorted_df.iloc[0]['No']
@@ -39,47 +40,75 @@ def solve_base(df, base_a):
         bases[curr['No']] = bases[prev['No']] + (prev['単位料金(入力)'] - curr['単位料金(入力)']) * prev['適用上限(m3)']
     return bases
 
-def stabilize_dataframe(df, base_a):
+def solve_unit(df, unit_a):
+    """基本料金から単位料金(単価)を導く"""
+    if df.empty: return {}
+    sorted_df = df.sort_values('No')
+    first_no = sorted_df.iloc[0]['No']
+    units = {first_no: unit_a}
+    for i in range(1, len(sorted_df)):
+        prev = sorted_df.iloc[i-1]
+        curr = sorted_df.iloc[i]
+        # 理論式: unit_curr = unit_prev - (base_curr - base_prev) / limit_prev
+        if prev['適用上限(m3)'] != 0:
+            units[curr['No']] = units[prev['No']] - (curr['基本料金(入力)'] - prev['基本料金(入力)']) / prev['適用上限(m3)']
+        else:
+            units[curr['No']] = units[prev['No']]
+    return units
+
+def stabilize_dataframe(df, start_val, mode='fwd'):
+    """データのクレンジングと再採番、および計算結果の統合"""
     if df is None or len(df) == 0:
-        return pd.DataFrame(columns=['No', '区画名', '適用上限(m3)', '単位料金(入力)', '基本料金(算出)'])
+        return pd.DataFrame()
     
     df = df.reset_index(drop=True)
     df['No'] = range(1, len(df) + 1)
     df['区画名'] = [get_alpha_label(i) for i in range(len(df))]
-    df['適用上限(m3)'] = pd.to_numeric(df['適用上限(m3)'], errors='coerce').fillna(0.0)
-    df['単位料金(入力)'] = pd.to_numeric(df['単位料金(入力)'], errors='coerce').fillna(0.0)
-    df.loc[df.index[-1], '適用上限(m3)'] = 99999.0
     
-    res_bases = solve_base(df, base_a)
-    df['基本料金(算出)'] = df['No'].map(res_bases)
+    df['適用上限(m3)'] = pd.to_numeric(df['適用上限(m3)'], errors='coerce').fillna(0.0)
+    df.loc[df.index[-1], '適用上限(m3)'] = 99999.0
+
+    if mode == 'fwd': # 従量料金基準
+        df['単位料金(入力)'] = pd.to_numeric(df['単位料金(入力)'], errors='coerce').fillna(0.0)
+        res_bases = solve_base(df, start_val)
+        df['基本料金(算出)'] = df['No'].map(res_bases)
+    else: # 基本料金基準
+        df['基本料金(入力)'] = pd.to_numeric(df['基本料金(入力)'], errors='coerce').fillna(0.0)
+        res_units = solve_unit(df, start_val)
+        df['単位料金(算出)'] = df['No'].map(res_units)
+        
     return df
 
 # ---------------------------------------------------------
 # 3. メイン UI
 # ---------------------------------------------------------
 
+# 初期データ構造
 if 'calc_data' not in st.session_state:
-    # 指示通り、適用上限の初期値を 8.0, 30.0, 99999.0 に変更
     init_df = pd.DataFrame([
-        {'No': 1, '区画名': 'A', '適用上限(m3)': 8.0, '単位料金(入力)': 650.0},
-        {'No': 2, '区画名': 'B', '適用上限(m3)': 30.0, '単位料金(入力)': 550.0},
-        {'No': 3, '区画名': 'C', '適用上限(m3)': 99999.0, '単位料金(入力)': 450.0}
+        {'No': 1, '区画名': 'A', '適用上限(m3)': 8.0, '単位料金(入力)': 650.0, '基本料金(入力)': 1500.0},
+        {'No': 2, '区画名': 'B', '適用上限(m3)': 30.0, '単位料金(入力)': 550.0, '基本料金(入力)': 2300.0},
+        {'No': 3, '区画名': 'C', '適用上限(m3)': 99999.0, '単位料金(入力)': 450.0, '基本料金(入力)': 5300.0}
     ])
-    st.session_state.calc_data = stabilize_dataframe(init_df, 1500.0)
+    st.session_state.calc_data = init_df
     st.session_state.last_base_a = 1500.0
+    st.session_state.last_unit_a = 650.0
 
 tab1, tab2 = st.tabs(["🔄 従量料金基準", "🧮 基本料金基準"])
 
+# --- Tab 1: 従量料金基準 ---
 with tab1:
-    st.info("💡 操作ガイド: 行の追加/削除に連動して自動計算されます。")
+    st.info("💡 操作ガイド: 単位料金を入力すると基本料金が自動計算されます。")
     c1, c2 = st.columns([1.1, 0.9])
     
     with c1:
         st.markdown("##### 1. パラメータ入力 (Input)")
-        base_a_fwd = st.number_input("✏️ 第1区画(A) 基本料金", value=float(st.session_state.last_base_a), step=10.0)
+        base_a_fwd = st.number_input("✏️ 第1区画(A) 基本料金", value=float(st.session_state.last_base_a), step=10.0, key="fwd_start")
         
-        edited_df = st.data_editor(
-            st.session_state.calc_data,
+        fwd_df = stabilize_dataframe(st.session_state.calc_data, base_a_fwd, mode='fwd')
+        
+        edited_fwd = st.data_editor(
+            fwd_df[['No', '区画名', '適用上限(m3)', '単位料金(入力)', '基本料金(算出)']],
             column_config={
                 "No": st.column_config.NumberColumn("🔒 No", disabled=True, width=40),
                 "区画名": st.column_config.TextColumn("🔒 区画", disabled=True, width=60),
@@ -87,29 +116,51 @@ with tab1:
                 "単位料金(入力)": st.column_config.NumberColumn("✏️ 単位料金", format="%.2f"),
                 "基本料金(算出)": st.column_config.NumberColumn("📊 基本料金(自算)", disabled=True, format="%.2f")
             },
-            num_rows="dynamic",
-            use_container_width=True,
-            key="main_editor"
+            num_rows="dynamic", use_container_width=True, key="editor_fwd"
         )
         
-        if base_a_fwd != st.session_state.last_base_a or not edited_df.equals(st.session_state.calc_data):
+        if base_a_fwd != st.session_state.last_base_a or not edited_fwd.equals(fwd_df[['No', '区画名', '適用上限(m3)', '単位料金(入力)', '基本料金(算出)']]):
             st.session_state.last_base_a = base_a_fwd
-            st.session_state.calc_data = stabilize_dataframe(edited_df, base_a_fwd)
+            st.session_state.calc_data = edited_fwd
             st.rerun()
 
     with c2:
         st.markdown("##### 2. 計算結果 (Result)")
-        display_df = st.session_state.calc_data.copy()
+        if not edited_fwd.empty:
+            res_fwd = edited_fwd.set_index('No')[['区画名', '適用上限(m3)', '単位料金(入力)', '基本料金(算出)']]
+            st.dataframe(res_fwd.style.format({'適用上限(m3)': "{:,.1f}", '単位料金(入力)': "{:,.2f}", '基本料金(算出)': "{:,.2f}"}), use_container_width=True)
+
+# --- Tab 2: 基本料金基準 ---
+with tab2:
+    st.info("💡 操作ガイド: 基本料金を入力すると単位料金(単価)が自動計算されます。")
+    c1, c2 = st.columns([1.1, 0.9])
+    
+    with c1:
+        st.markdown("##### 1. パラメータ入力 (Input)")
+        unit_a_rev = st.number_input("✏️ 第1区画(A) 単位料金", value=float(st.session_state.last_unit_a), step=1.0, key="rev_start")
         
-        target_cols = ['区画名', '適用上限(m3)', '単位料金(入力)', '基本料金(算出)']
-        available_cols = [c for c in target_cols if c in display_df.columns]
+        rev_df = stabilize_dataframe(st.session_state.calc_data, unit_a_rev, mode='rev')
         
-        if not display_df.empty:
-            st.dataframe(
-                display_df.set_index('No')[available_cols].style.format({
-                    '適用上限(m3)': "{:,.1f}",
-                    '単位料金(入力)': "{:,.2f}",
-                    '基本料金(算出)': "{:,.2f}"
-                }, na_rep="-"), 
-                use_container_width=True
-            )
+        edited_rev = st.data_editor(
+            rev_df[['No', '区画名', '適用上限(m3)', '基本料金(入力)', '単位料金(算出)']],
+            column_config={
+                "No": st.column_config.NumberColumn("🔒 No", disabled=True, width=40),
+                "区画名": st.column_config.TextColumn("🔒 区画", disabled=True, width=60),
+                "適用上限(m3)": st.column_config.NumberColumn("✏️ 適用上限", format="%.1f"),
+                "基本料金(入力)": st.column_config.NumberColumn("✏️ 基本料金", format="%.2f"),
+                "単位料金(算出)": st.column_config.NumberColumn("📊 単位料金(自算)", disabled=True, format="%.2f")
+            },
+            num_rows="dynamic", use_container_width=True, key="editor_rev"
+        )
+        
+        if unit_a_rev != st.session_state.last_unit_a or not edited_rev.equals(rev_df[['No', '区画名', '適用上限(m3)', '基本料金(入力)', '単位料金(算出)']]):
+            st.session_state.last_unit_a = unit_a_rev
+            st.session_state.calc_data = edited_rev
+            st.rerun()
+
+    with c2:
+        st.markdown("##### 2. 計算結果 (Result)")
+        if not edited_rev.empty:
+            # 表示順: 区画名 -> 適用上限 -> 単位料金 -> 基本料金
+            res_rev = edited_rev.set_index('No')[['区画名', '適用上限(m3)', '単位料金(算出)', '基本料金(入力)']]
+            st.dataframe(res_rev.style.format({'適用上限(m3)': "{:,.1f}", '単位料金(算出)': "{:,.2f}", '基本料金(入力)': "{:,.2f}"}), use_container_width=True)
