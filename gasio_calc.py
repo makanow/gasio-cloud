@@ -1,29 +1,27 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
 
 # ---------------------------------------------------------
-# 1. 設定 & デザイン (Gasio mini Style 移植)
+# 1. 設定 & デザイン
 # ---------------------------------------------------------
 st.set_page_config(page_title="Gasio 電卓", page_icon="🧮", layout="wide")
 
 st.markdown("""
     <style>
     .block-container { padding-top: 2rem; }
-    /* タイトルのフォントサイズとウェイト (Gasio mini準拠) */
     .main-title { font-size: 3rem; font-weight: 800; color: #2c3e50; text-align: left; margin-bottom: 0; letter-spacing: -1px; }
-    /* ブルーアンダーラインのサブタイトル (Gasio mini準拠) */
     .sub-title { font-size: 1.2rem; color: #7f8c8d; text-align: left; border-bottom: 2px solid #3498db; padding-bottom: 10px; margin-bottom: 20px;}
+    .hayami-header { background-color: #2c3e50; color: white; padding: 5px 10px; border-radius: 5px; font-weight: bold; }
     </style>
 """, unsafe_allow_html=True)
 
-# ロゴの文字色修復: i(赤), o(青) + 「電卓」の日本語タイトル
 st.markdown('<div class="main-title"><span style="color:#2c3e50">Gas</span><span style="color:#e74c3c">i</span><span style="color:#3498db">o</span> <span style="color:#2c3e50">電卓</span></div>', unsafe_allow_html=True)
 st.markdown('<div class="sub-title">Rate Design Solver (Integrated Stable Build)</div>', unsafe_allow_html=True)
 
 # ---------------------------------------------------------
 # 2. ロジック (アルファベット生成 & 算出)
 # ---------------------------------------------------------
-
 def get_alpha_label(n):
     label = ""
     while n >= 0:
@@ -78,9 +76,73 @@ def stabilize_dataframe(df, start_val, mode='fwd'):
     return df
 
 # ---------------------------------------------------------
-# 3. メイン UI
+# 3. 早見表ジェネレーター ロジック
 # ---------------------------------------------------------
+def calc_bill(usage, df_rates):
+    target = df_rates[df_rates['適用上限(m3)'] >= (usage - 1e-9)]
+    row = target.iloc[0] if not target.empty else df_rates.iloc[-1]
+    # ガス料金は通常、小数点以下切り捨て
+    return int(row['基本料金'] + (usage * row['調整後単位料金']))
 
+def generate_hayami_tables(df_rates, adj_rate):
+    df = df_rates.copy()
+    df['調整後単位料金'] = df['単位料金'] + adj_rate
+
+    # 表1: 0.0 ~ 40.9 (0.1刻み)
+    t1 = []
+    for i in range(41):
+        r = {"m³": i}
+        for j in range(10):
+            r[f"0.{j}"] = calc_bill(i + j*0.1, df)
+        t1.append(r)
+    
+    # 表2: 40 ~ 209 (1.0刻み、10行ごと)
+    t2 = []
+    for i in range(40, 201, 10):
+        r = {"m³": i}
+        for j in range(10):
+            if i == 40 and j == 0:
+                r[str(j)] = np.nan # 40.0は表1にあるため空欄
+            else:
+                r[str(j)] = calc_bill(i + j, df)
+        t2.append(r)
+
+    return pd.DataFrame(t1), pd.DataFrame(t2), df
+
+def render_hayami_generator(df_base, base_col, unit_col, tab_key):
+    st.markdown("---")
+    st.markdown('#### 📄 調整後 ガス料金早見表 ジェネレーター')
+    st.markdown("算出された基本料金・単位料金に**「原料費調整単価」**を加減算し、実運用向けの早見表を自動生成します。")
+    
+    col_in, col_dummy = st.columns([1, 2])
+    with col_in:
+        adj_rate = st.number_input("⚡ 原料費調整単価 (円/m³)", value=0.00, step=0.10, format="%.2f", key=f"adj_{tab_key}")
+
+    # データ整形
+    calc_df = df_base[['区画名', '適用上限(m3)', base_col, unit_col]].copy()
+    calc_df.columns = ['区画名', '適用上限(m3)', '基本料金', '単位料金']
+    
+    # 表生成
+    df_t1, df_t2, df_adj = generate_hayami_tables(calc_df, adj_rate)
+
+    st.markdown("**【適用される料金表（調整後）】**")
+    st.dataframe(df_adj.style.format({
+        "適用上限(m3)": "{:,.1f}", "基本料金": "¥{:,.2f}", "単位料金": "¥{:,.2f}", "調整後単位料金": "¥{:,.2f}"
+    }), use_container_width=True, hide_index=True)
+
+    # 早見表の表示設定
+    fmt1 = {col: "{:,.0f}" for col in df_t1.columns if col != "m³"}
+    fmt2 = {col: "{:,.0f}" for col in df_t2.columns if col != "m³"}
+
+    st.markdown('<div class="hayami-header">▼ 早見表 ①（0.0m³ 〜 40.9m³）※0.1m³刻み</div>', unsafe_allow_html=True)
+    st.dataframe(df_t1.style.format(fmt1).hide(axis="index"), use_container_width=True)
+
+    st.markdown('<div class="hayami-header">▼ 早見表 ②（40m³ 〜 209m³）※1.0m³刻み</div>', unsafe_allow_html=True)
+    st.dataframe(df_t2.style.format(fmt2, na_rep="-").hide(axis="index"), use_container_width=True)
+
+# ---------------------------------------------------------
+# 4. メイン UI
+# ---------------------------------------------------------
 if 'calc_data' not in st.session_state:
     st.session_state.calc_data = pd.DataFrame([
         {'No': 1, '区画名': 'A', '適用上限(m3)': 8.0, '単位料金(入力)': 650.0, '基本料金(入力)': 1500.0},
@@ -132,6 +194,10 @@ with tab1:
                 use_container_width=True
             )
 
+    # 🌟 早見表ジェネレーター呼び出し
+    if not edited_fwd.empty:
+        render_hayami_generator(edited_fwd, base_col='基本料金(算出)', unit_col='単位料金(入力)', tab_key='fwd')
+
 # --- Tab 2: 基本料金基準 ---
 with tab2:
     st.info("💡 操作ガイド: 基本料金を入力すると単位料金が自動計算されます。")
@@ -169,3 +235,7 @@ with tab2:
                     '単位料金(算出)': "{:,.2f}",
                     '基本料金(入力)': "{:,.2f}"
                 }), use_container_width=True)
+
+    # 🌟 早見表ジェネレーター呼び出し
+    if not edited_rev.empty:
+        render_hayami_generator(edited_rev, base_col='基本料金(入力)', unit_col='単位料金(算出)', tab_key='rev')
