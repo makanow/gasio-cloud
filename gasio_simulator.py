@@ -42,7 +42,7 @@ with c_head1:
     st.markdown('<div class="main-title"><span style="color:#2c3e50">Gas</span><span style="color:#e74c3c">i</span><span style="color:#3498db">o</span> 計算機</div>', unsafe_allow_html=True)
     st.markdown('<div class="sub-title">Cloud Edition - Rate Simulation System</div>', unsafe_allow_html=True)
 
-# --- ステート管理 (ここを3プランに修正) ---
+# --- ステート管理 ---
 if 'simulation_result' not in st.session_state: st.session_state.simulation_result = None
 if 'plan_data' not in st.session_state:
     d_df = pd.DataFrame({'No': [1, 2, 3], '区画名': ['A', 'B', 'C'], '適用上限(m3)': [8.0, 30.0, 99999.0], '単位料金': [500.0, 400.0, 300.0]})
@@ -159,53 +159,86 @@ with st.sidebar:
     st.download_button("💾 設定保存(.json)", save_json_data, f"gasio_config_{datetime.datetime.now().strftime('%Y%m%d')}.json")
 
 # ---------------------------------------------------------
-# 4. メインエリア
+# 4. メインエリア (ダッシュボード化)
 # ---------------------------------------------------------
 if file_usage and file_master and selected_ids:
     df_usage = smart_load_wrapper(file_usage, 'usage')
     df_target_usage = df_usage[df_usage['料金表番号'].isin(selected_ids)].copy()
     
+    # === 🌟 現行マスタの確認エリア ===
+    with st.expander("📋 現行の料金表マスタを確認する（比較用）", expanded=False):
+        st.markdown("現在選択されている料金表マスタです。新しいプランを設計する際の基準としてご覧ください。")
+        master_cols = st.columns(min(len(selected_ids), 3))
+        for idx, t_id in enumerate(selected_ids):
+            with master_cols[idx % 3]:
+                st.markdown(f"**【料金表番号: {t_id}】**")
+                target_df = df_master_all[df_master_all['料金表番号'] == t_id].copy()
+                st.dataframe(
+                    target_df[['MIN', 'MAX', '基本料金', '単位料金']].style.format({
+                        "MIN": "{:,.1f}", "MAX": "{:,.1f}", "基本料金": "¥{:,.2f}", "単位料金": "¥{:,.2f}"
+                    }), hide_index=True, use_container_width=True
+                )
+    # ==========================================
+
     tab_design, tab_sim, tab_analysis = st.tabs(["Design", "Simulation", "Analysis"])
 
     with tab_design:
-        st.markdown("##### 料金プラン設計")
-        plan_tabs = st.tabs([f"Plan {i+1}" for i in range(3)]) 
+        st.markdown("##### 📊 料金プラン一括比較 & 設計")
+
+        # --- 先に全プラン(1〜3)の計算を行う ---
         new_plans = {}
+        for i in range(3):
+            if not st.session_state.plan_data[i].empty:
+                curr_plan = st.session_state.plan_data[i]
+                bases = calculate_slide_rates(st.session_state.base_a[i], curr_plan)
+                res_df = pd.DataFrame([{"区画名":r['区画名'], "MIN":0.0, "MAX":r['適用上限(m3)'], "基本料金":bases.get(r['No'],0), "単位料金":r['単位料金']} for _, r in curr_plan.iterrows()])
+                new_plans[f"Plan_{i+1}"] = res_df
+
+        # === 🌟 3プラン横並びサマリー ===
+        sum_cols = st.columns(3)
+        for i, (p_name, p_df) in enumerate(new_plans.items()):
+            with sum_cols[i]:
+                st.markdown(f"**{p_name}**")
+                st.dataframe(p_df.style.format({"MIN": "{:,.1f}", "MAX": "{:,.1f}", "基本料金": "¥{:,.0f}", "単位料金": "¥{:,.2f}"}), hide_index=True, use_container_width=True)
+
+        # === 🌟 統合グラフ（3本線を重ねる） ===
+        st.markdown("###### 📈 料金カーブ比較 (0〜50m3)")
+        compare_df = pd.DataFrame({"使用量": list(range(0, 51, 2))})
+        for p_name, p_df in new_plans.items():
+            compare_df[p_name] = compare_df["使用量"].apply(lambda v: calculate_bill_single(v, p_df))
+        
+        fig = px.line(compare_df, x="使用量", y=list(new_plans.keys()), height=300, color_discrete_sequence=['#3498db', '#e74c3c', '#2ecc71'])
+        fig.update_layout(yaxis_title="ガス料金(円)", legend_title="プラン", margin=dict(l=0, r=0, t=10, b=0))
+        st.plotly_chart(fig, use_container_width=True)
+
+        st.markdown("---")
+        st.markdown("##### 🛠️ プラン詳細編集")
+
+        # === 編集画面はコンパクトにまとめる ===
+        plan_tabs = st.tabs([f"Plan {i+1}" for i in range(3)]) 
         for i, pt in enumerate(plan_tabs):
             with pt:
-                c1, c2 = st.columns(2)
+                c1, c2 = st.columns([1, 2]) 
                 with c1:
-                    # 基本料金入力
                     st.session_state.base_a[i] = st.number_input(f"🖋️ A区画 基本料金", value=st.session_state.base_a[i], key=f"ba_{i}", format="%.2f")
-                    bc1, bc2, _ = st.columns([1,1,4])
-                    if bc1.button("＋", key=f"add_{i}"):
+                    bc1, bc2, _ = st.columns([1,1,2])
+                    if bc1.button("＋ 区画追加", key=f"add_{i}"):
                         curr = st.session_state.plan_data[i]
                         new_no = len(curr)+1
                         st.session_state.plan_data[i] = pd.concat([curr, pd.DataFrame({'No':[new_no], '区画名':["ABCDEFGHIJKLMNOPQRSTUVWXYZ"[new_no-1] if new_no<=26 else f"T{new_no}"], '適用上限(m3)':[99999.0], '単位料金':[max(0.0, curr.iloc[-1]['単位料金']-50.0)]})], ignore_index=True)
                         st.rerun()
-                    if bc2.button("－", key=f"del_{i}"):
+                    if bc2.button("－ 区画削除", key=f"del_{i}"):
                         if len(st.session_state.plan_data[i]) > 1:
                             st.session_state.plan_data[i] = st.session_state.plan_data[i].iloc[:-1].copy()
                             st.session_state.plan_data[i].iloc[-1, 2] = 99999.0
                             st.rerun()
-                    
-                    # 料金表データエディタ（修正ポイント: ステートの直接上書きと競合回避）
+                with c2:
                     edited = st.data_editor(st.session_state.plan_data[i], use_container_width=True, key=f"ed_plan_{i}", 
                                            column_config={"No": st.column_config.NumberColumn(disabled=True), "区画名": st.column_config.TextColumn("🖋️ 区画名"), "適用上限(m3)": st.column_config.NumberColumn("🖋️ 適用上限", format="%.1f"), "単位料金": st.column_config.NumberColumn("🖋️ 単位料金", format="%.4f")})
                     
-                    # 編集内容に差異がある場合のみ反映
                     if not edited.equals(st.session_state.plan_data[i]):
                         st.session_state.plan_data[i] = edited
                         st.rerun()
-
-                with c2:
-                    if not st.session_state.plan_data[i].empty:
-                        curr_plan = st.session_state.plan_data[i]
-                        bases = calculate_slide_rates(st.session_state.base_a[i], curr_plan)
-                        res_df = pd.DataFrame([{"区画名":r['区画名'], "MIN":0.0, "MAX":r['適用上限(m3)'], "基本料金":bases.get(r['No'],0), "単位料金":r['単位料金']} for _, r in curr_plan.iterrows()])
-                        new_plans[f"Plan_{i+1}"] = res_df
-                        st.dataframe(res_df.style.format({"MIN": "{:,.1f}", "MAX": "{:,.1f}", "基本料金": "{:,.2f}", "単位料金": "{:,.4f}"}), hide_index=True, use_container_width=True)
-                        st.plotly_chart(px.line(x=list(range(0, 51, 2)), y=[calculate_bill_single(v, res_df) for v in range(0, 51, 2)], height=250), use_container_width=True, key=f"pl_{i}")
 
     with tab_sim:
         st.markdown("##### 収支影響シミュレーション")
