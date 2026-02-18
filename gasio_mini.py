@@ -108,7 +108,7 @@ if is_demo_mode:
 if df_usage is not None and df_master is not None:
     # 🌟 デモモード時の警告表示
     if is_demo_mode:
-        st.warning("🚀 **現在デモモードで動作中**：架空の顧客データ（800件）と架空の現行料金表で集計しています。ご自身のデータを分析するには、左のサイドバーから「使用量CSV」と「マスタCSV」をアップロードしてください。")
+        st.warning("🚀 **現在デモモードで動作中**：デモデータで集計しています。ご自身のデータを分析するには、左のサイドバーから「使用量CSV」と「マスタCSV」をアップロードしてください。")
 
     usage_ids = sorted(df_usage['料金表番号'].unique())
     selected_ids = st.sidebar.multiselect("料金表番号を選択", usage_ids, default=usage_ids[:1])
