@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+import io
 
 # ---------------------------------------------------------
 # 1. 設定 & デザイン
@@ -112,7 +113,7 @@ def generate_hayami_tables(df_rates, adj_rate):
 def render_hayami_generator(df_base, base_col, unit_col, tab_key):
     st.markdown("---")
     
-    # 🌟 ここを変更：st.expander で全体を包む
+    # st.expander で全体を包み、デフォルトを折りたたみに設定
     with st.expander("📄 ガス料金早見表 ジェネレーター（クリックで展開）", expanded=False):
         st.markdown("算出された基本料金・単位料金に**「原料費調整単価」**を加減算し、実運用向けの早見表を自動生成します。")
         
@@ -141,6 +142,33 @@ def render_hayami_generator(df_base, base_col, unit_col, tab_key):
 
         st.markdown('<div class="hayami-header">▼ 早見表 ②（40m³ 〜 209m³）※1.0m³刻み</div>', unsafe_allow_html=True)
         st.dataframe(df_t2.style.format(fmt2, na_rep="-").hide(axis="index"), use_container_width=True)
+
+        # --- Excelダウンロード機能 ---
+        output = io.BytesIO()
+        # engine='xlsxwriter' または 'openpyxl' が必要です（多くのStreamlit環境にはどちらか入っています）
+        try:
+            with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                df_adj.to_excel(writer, index=False, sheet_name='1. 適用料金表')
+                df_t1.to_excel(writer, index=False, sheet_name='2. 早見表(0.0-40.9)')
+                df_t2.to_excel(writer, index=False, sheet_name='3. 早見表(40-209)')
+        except ValueError:
+            # xlsxwriterが無い場合は openpyxl でフォールバック
+            with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                df_adj.to_excel(writer, index=False, sheet_name='1. 適用料金表')
+                df_t1.to_excel(writer, index=False, sheet_name='2. 早見表(0.0-40.9)')
+                df_t2.to_excel(writer, index=False, sheet_name='3. 早見表(40-209)')
+
+        excel_data = output.getvalue()
+        
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.download_button(
+            label="📥 この早見表をExcelでダウンロード（印刷・PDF化用）",
+            data=excel_data,
+            file_name=f"ガス料金早見表_調整単価{adj_rate}円.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            type="primary",
+            key=f"dl_excel_{tab_key}" # タブごとのキー被りを防止
+        )
 
 # ---------------------------------------------------------
 # 4. メイン UI
