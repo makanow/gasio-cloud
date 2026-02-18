@@ -111,34 +111,36 @@ def generate_hayami_tables(df_rates, adj_rate):
 
 def render_hayami_generator(df_base, base_col, unit_col, tab_key):
     st.markdown("---")
-    st.markdown('#### 📄 ガス料金早見表 ジェネレーター')
-    st.markdown("算出された基本料金・単位料金に**「原料費調整単価」**を加減算し、実運用向けの早見表を自動生成します。")
     
-    col_in, col_dummy = st.columns([1, 2])
-    with col_in:
-        adj_rate = st.number_input("⚡ 原料費調整単価 (円/m³)", value=0.00, step=0.10, format="%.2f", key=f"adj_{tab_key}")
+    # 🌟 ここを変更：st.expander で全体を包む
+    with st.expander("📄 ガス料金早見表 ジェネレーター（クリックで展開）", expanded=False):
+        st.markdown("算出された基本料金・単位料金に**「原料費調整単価」**を加減算し、実運用向けの早見表を自動生成します。")
+        
+        col_in, col_dummy = st.columns([1, 2])
+        with col_in:
+            adj_rate = st.number_input("⚡ 原料費調整単価 (円/m³)", value=0.00, step=0.10, format="%.2f", key=f"adj_{tab_key}")
 
-    # データ整形
-    calc_df = df_base[['区画名', '適用上限(m3)', base_col, unit_col]].copy()
-    calc_df.columns = ['区画名', '適用上限(m3)', '基本料金', '単位料金']
-    
-    # 表生成
-    df_t1, df_t2, df_adj = generate_hayami_tables(calc_df, adj_rate)
+        # データ整形
+        calc_df = df_base[['区画名', '適用上限(m3)', base_col, unit_col]].copy()
+        calc_df.columns = ['区画名', '適用上限(m3)', '基本料金', '単位料金']
+        
+        # 表生成
+        df_t1, df_t2, df_adj = generate_hayami_tables(calc_df, adj_rate)
 
-    st.markdown("**【適用される料金表（調整後）】**")
-    st.dataframe(df_adj.style.format({
-        "適用上限(m3)": "{:,.1f}", "基本料金": "¥{:,.2f}", "単位料金": "¥{:,.2f}", "調整単位料金": "¥{:,.2f}"
-    }), use_container_width=True, hide_index=True)
+        st.markdown("**【適用される料金表（調整後）】**")
+        st.dataframe(df_adj.style.format({
+            "適用上限(m3)": "{:,.1f}", "基本料金": "¥{:,.2f}", "単位料金": "¥{:,.2f}", "調整単位料金": "¥{:,.2f}"
+        }), use_container_width=True, hide_index=True)
 
-    # 早見表の表示設定
-    fmt1 = {col: "{:,.0f}" for col in df_t1.columns if col != "m³"}
-    fmt2 = {col: "{:,.0f}" for col in df_t2.columns if col != "m³"}
+        # 早見表の表示設定
+        fmt1 = {col: "{:,.0f}" for col in df_t1.columns if col != "m³"}
+        fmt2 = {col: "{:,.0f}" for col in df_t2.columns if col != "m³"}
 
-    st.markdown('<div class="hayami-header">▼ 早見表 ①（0.0m³ 〜 40.9m³）※0.1m³刻み</div>', unsafe_allow_html=True)
-    st.dataframe(df_t1.style.format(fmt1).hide(axis="index"), use_container_width=True)
+        st.markdown('<div class="hayami-header">▼ 早見表 ①（0.0m³ 〜 40.9m³）※0.1m³刻み</div>', unsafe_allow_html=True)
+        st.dataframe(df_t1.style.format(fmt1).hide(axis="index"), use_container_width=True)
 
-    st.markdown('<div class="hayami-header">▼ 早見表 ②（40m³ 〜 209m³）※1.0m³刻み</div>', unsafe_allow_html=True)
-    st.dataframe(df_t2.style.format(fmt2, na_rep="-").hide(axis="index"), use_container_width=True)
+        st.markdown('<div class="hayami-header">▼ 早見表 ②（40m³ 〜 209m³）※1.0m³刻み</div>', unsafe_allow_html=True)
+        st.dataframe(df_t2.style.format(fmt2, na_rep="-").hide(axis="index"), use_container_width=True)
 
 # ---------------------------------------------------------
 # 4. メイン UI
@@ -194,7 +196,7 @@ with tab1:
                 use_container_width=True
             )
 
-    # 🌟 早見表ジェネレーター呼び出し
+    # 早見表ジェネレーター呼び出し
     if not edited_fwd.empty:
         render_hayami_generator(edited_fwd, base_col='基本料金(算出)', unit_col='単位料金(入力)', tab_key='fwd')
 
@@ -236,6 +238,6 @@ with tab2:
                     '基本料金(入力)': "{:,.2f}"
                 }), use_container_width=True)
 
-    # 🌟 早見表ジェネレーター呼び出し
+    # 早見表ジェネレーター呼び出し
     if not edited_rev.empty:
         render_hayami_generator(edited_rev, base_col='基本料金(入力)', unit_col='単位料金(算出)', tab_key='rev')
