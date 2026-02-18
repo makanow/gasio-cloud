@@ -8,7 +8,7 @@ import json
 import datetime
 
 # ---------------------------------------------------------
-# 1. 設定 & デザイン (Gasio Style 完全維持)
+# 1. 設定 & デザイン
 # ---------------------------------------------------------
 st.set_page_config(page_title="Gasio計算機", page_icon="🔥", layout="wide", initial_sidebar_state="expanded")
 
@@ -53,7 +53,7 @@ CHIC_PIE_COLORS = ['#88a0b9', '#aab7b8', '#82e0aa', '#f5b7b1', '#d7bde2', '#f9e7
 COLOR_BAR, COLOR_CURRENT, COLOR_NEW = '#34495e', '#95a5a6', '#e67e22'
 
 # ---------------------------------------------------------
-# 2. 関数定義 (実務ロジック維持)
+# 2. 関数定義
 # ---------------------------------------------------------
 def normalize_columns(df):
     rename_map = {'基本':'基本料金','基礎料金':'基本料金','Base':'基本料金','上限':'MAX','適用上限':'MAX','ID':'料金表番号','Usage':'使用量','調定':'調定数'}
@@ -130,7 +130,7 @@ def get_tier_name(usage, tariff_df):
     return str(row.get('区画名', row.get('区画', row.name + 1)))
 
 # ---------------------------------------------------------
-# 3. サイドバー
+# 3. サイドバー & データロード (デモデータ自動生成ロジック追加)
 # ---------------------------------------------------------
 with st.sidebar:
     st.header("📂 Data Import")
@@ -147,25 +147,51 @@ with st.sidebar:
     file_usage = st.file_uploader("1. 使用量CSV", type=['csv'], key="u")
     file_master = st.file_uploader("2. 料金表マスタCSV", type=['csv'], key="m")
     
+    # 🌟 データ読み込みとデモモードの判定
+    df_master_all = None
+    df_usage = None
     selected_ids = []
-    if file_master:
-        df_master_all = smart_load_wrapper(file_master, 'master')
-        if df_master_all is not None:
+    is_demo_mode = True
+
+    if file_master and file_usage:
+        tmp_master = smart_load_wrapper(file_master, 'master')
+        tmp_usage = smart_load_wrapper(file_usage, 'usage')
+        if tmp_master is not None and tmp_usage is not None:
+            df_master_all = tmp_master
+            df_usage = tmp_usage
+            is_demo_mode = False
             u_ids = sorted(df_master_all['料金表番号'].unique())
             selected_ids = st.multiselect("対象料金表", u_ids, default=u_ids)
+
+    if is_demo_mode:
+        st.info("💡 CSV未設定のため、デモデータ読込中")
+        # デモ用マスタ
+        df_master_all = pd.DataFrame({
+            'MIN': [0.0, 8.0, 30.0], 'MAX': [8.0, 30.0, 999999999.0],
+            '基本料金': [1800.0, 2600.0, 5600.0], '単位料金': [550.0, 450.0, 350.0],
+            '料金表番号': [99, 99, 99], '区画': ['A', 'B', 'C']
+        })
+        # デモ用使用量（ガンマ分布を使って、リアルなガス使用量の偏りを再現）
+        np.random.seed(42)
+        demo_usages = np.round(np.random.gamma(shape=2.5, scale=6.0, size=800), 1)
+        df_usage = pd.DataFrame({'使用量': demo_usages, '調定数': 1, '料金表番号': 99})
+        selected_ids = [99]
 
     st.markdown("---")
     save_json_data = json.dumps({'plan_data': {k: v.to_dict(orient='records') for k, v in st.session_state.plan_data.items()}, 'base_a': st.session_state.base_a}, indent=2, ensure_ascii=False)
     st.download_button("💾 設定保存(.json)", save_json_data, f"gasio_config_{datetime.datetime.now().strftime('%Y%m%d')}.json")
 
 # ---------------------------------------------------------
-# 4. メインエリア (ダッシュボード化)
+# 4. メインエリア
 # ---------------------------------------------------------
-if file_usage and file_master and selected_ids:
-    df_usage = smart_load_wrapper(file_usage, 'usage')
+if df_usage is not None and df_master_all is not None and selected_ids:
     df_target_usage = df_usage[df_usage['料金表番号'].isin(selected_ids)].copy()
     
-    # === 🌟 現行マスタの確認エリア ===
+    # 🌟 デモモード時の警告表示
+    if is_demo_mode:
+        st.warning("🚀 **現在デモモードで動作中**：架空の顧客データ（800件）と架空の現行料金表でシミュレーションしています。ご自身のデータを分析するには、左のサイドバーから「使用量CSV」と「マスタCSV」をアップロードしてください。")
+
+    # === 現行マスタの確認エリア ===
     with st.expander("📋 現行の料金表マスタを確認する（比較用）", expanded=False):
         st.markdown("現在選択されている料金表マスタです。新しいプランを設計する際の基準としてご覧ください。")
         master_cols = st.columns(min(len(selected_ids), 3))
@@ -178,14 +204,12 @@ if file_usage and file_master and selected_ids:
                         "MIN": "{:,.1f}", "MAX": "{:,.1f}", "基本料金": "¥{:,.2f}", "単位料金": "¥{:,.2f}"
                     }), hide_index=True, use_container_width=True
                 )
-    # ==========================================
 
     tab_design, tab_sim, tab_analysis = st.tabs(["Design", "Simulation", "Analysis"])
 
     with tab_design:
         st.markdown("##### 📊 料金プラン一括比較 & 設計")
 
-        # --- 先に全プラン(1〜3)の計算を行う ---
         new_plans = {}
         for i in range(3):
             if not st.session_state.plan_data[i].empty:
@@ -194,14 +218,12 @@ if file_usage and file_master and selected_ids:
                 res_df = pd.DataFrame([{"区画名":r['区画名'], "MIN":0.0, "MAX":r['適用上限(m3)'], "基本料金":bases.get(r['No'],0), "単位料金":r['単位料金']} for _, r in curr_plan.iterrows()])
                 new_plans[f"Plan_{i+1}"] = res_df
 
-        # === 🌟 3プラン横並びサマリー ===
         sum_cols = st.columns(3)
         for i, (p_name, p_df) in enumerate(new_plans.items()):
             with sum_cols[i]:
                 st.markdown(f"**{p_name}**")
                 st.dataframe(p_df.style.format({"MIN": "{:,.1f}", "MAX": "{:,.1f}", "基本料金": "¥{:,.0f}", "単位料金": "¥{:,.2f}"}), hide_index=True, use_container_width=True)
 
-        # === 🌟 統合グラフ（3本線を重ねる） ===
         st.markdown("###### 📈 料金カーブ比較 (0〜50m3)")
         compare_df = pd.DataFrame({"使用量": list(range(0, 51, 2))})
         for p_name, p_df in new_plans.items():
@@ -214,7 +236,6 @@ if file_usage and file_master and selected_ids:
         st.markdown("---")
         st.markdown("##### 🛠️ プラン詳細編集")
 
-        # === 編集画面はコンパクトにまとめる ===
         plan_tabs = st.tabs([f"Plan {i+1}" for i in range(3)]) 
         for i, pt in enumerate(plan_tabs):
             with pt:
@@ -235,7 +256,6 @@ if file_usage and file_master and selected_ids:
                 with c2:
                     edited = st.data_editor(st.session_state.plan_data[i], use_container_width=True, key=f"ed_plan_{i}", 
                                            column_config={"No": st.column_config.NumberColumn(disabled=True), "区画名": st.column_config.TextColumn("🖋️ 区画名"), "適用上限(m3)": st.column_config.NumberColumn("🖋️ 適用上限", format="%.1f"), "単位料金": st.column_config.NumberColumn("🖋️ 単位料金", format="%.4f")})
-                    
                     if not edited.equals(st.session_state.plan_data[i]):
                         st.session_state.plan_data[i] = edited
                         st.rerun()
@@ -295,5 +315,3 @@ if file_usage and file_master and selected_ids:
             agg_n = df_target_usage.groupby('新区画').agg(件数=('調定数','sum'), 使用量=('使用量','sum')).reset_index()
             st.plotly_chart(px.pie(agg_n, values='件数', names='新区画', hole=0.5, color_discrete_sequence=CHIC_PIE_COLORS), use_container_width=True)
             st.dataframe(agg_n.style.format({"件数":"{:,.0f}", "使用量":"{:,.1f}"}), hide_index=True, use_container_width=True)
-else:
-    st.info("👈 サイドバーからCSVを読み込んでください")
