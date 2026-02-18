@@ -111,7 +111,7 @@ def generate_hayami_tables(df_rates, adj_rate):
 
 def render_hayami_generator(df_base, base_col, unit_col, tab_key):
     st.markdown("---")
-    st.markdown('#### 📄 調整後 ガス料金早見表 ジェネレーター')
+    st.markdown('#### 📄 ガス料金早見表 ジェネレーター')
     st.markdown("算出された基本料金・単位料金に**「原料費調整単価」**を加減算し、実運用向けの早見表を自動生成します。")
     
     col_in, col_dummy = st.columns([1, 2])
