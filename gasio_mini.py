@@ -126,7 +126,7 @@ if df_usage is not None and df_master is not None:
             fps_check[tid] = tuple(f)
     
     if len(set(fps_check.values())) > 1:
-        st.error("⚠️ 境界線が不一致です。")
+        st.error("⚠️ 料金表の区画が一致しません。")
         st.stop()
 
     # === 🌟 現行マスタの確認エリア ===
