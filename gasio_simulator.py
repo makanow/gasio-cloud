@@ -189,7 +189,7 @@ if df_usage is not None and df_master_all is not None and selected_ids:
     
     # 🌟 デモモード時の警告表示
     if is_demo_mode:
-        st.warning("🚀 **現在デモモードで動作中**：架空の顧客データ（800件）と架空の現行料金表でシミュレーションしています。ご自身のデータを分析するには、左のサイドバーから「使用量CSV」と「マスタCSV」をアップロードしてください。")
+        st.warning("🚀 **現在デモモードで動作中**：デモデータでシミュレーションしています。ご自身のデータを分析するには、左のサイドバーから「使用量CSV」と「マスタCSV」をアップロードしてください。")
 
     # === 現行マスタの確認エリア ===
     with st.expander("📋 現行の料金表マスタを確認する（比較用）", expanded=False):
