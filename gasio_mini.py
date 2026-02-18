@@ -72,26 +72,46 @@ def get_tier_name(usage, tariff_df):
     return letters[rank-1] if rank <= len(letters) else f"Tier{rank}"
 
 # ---------------------------------------------------------
-# 3. メイン処理
+# 3. メイン処理 (デモデータ自動生成ロジック追加)
 # ---------------------------------------------------------
 with st.sidebar:
     st.header("📂 Data Import")
     file_usage = st.file_uploader("1. 使用量CSV (実績)", type=['csv'])
     file_master = st.file_uploader("2. 料金表マスタCSV (定義)", type=['csv'])
 
-# --- 未アップロード時の案内表示 (ナガセ・カスタム) ---
-if not file_usage or not file_master:
-    st.markdown("---")
-    st.info("👈 サイドバーからCSVを読み込んでください")
-    st.stop()
+# 🌟 データ読み込みとデモモードの判定
+df_master = None
+df_usage = None
+is_demo_mode = True
 
-# --- ファイル読み込み ---
-df_usage = smart_load(file_usage)
-df_master = smart_load(file_master)
+if file_master and file_usage:
+    tmp_master = smart_load(file_master)
+    tmp_usage = smart_load(file_usage)
+    if tmp_master is not None and tmp_usage is not None:
+        df_master = tmp_master
+        df_usage = tmp_usage
+        is_demo_mode = False
+
+if is_demo_mode:
+    st.info("💡 CSV未設定のため、デモデータ読込中")
+    # デモ用マスタ
+    df_master = pd.DataFrame({
+        'MIN': [0.0, 8.0, 30.0], 'MAX': [8.0, 30.0, 999999999.0],
+        '基本料金': [1800.0, 2600.0, 5600.0], '単位料金': [550.0, 450.0, 350.0],
+        '料金表番号': [99, 99, 99], '区画': ['A', 'B', 'C']
+    })
+    # デモ用使用量（ガンマ分布を使って、リアルなガス使用量の偏りを再現）
+    np.random.seed(42)
+    demo_usages = np.round(np.random.gamma(shape=2.5, scale=6.0, size=800), 1)
+    df_usage = pd.DataFrame({'使用量': demo_usages, '調定数': 1, '料金表番号': 99})
 
 if df_usage is not None and df_master is not None:
+    # 🌟 デモモード時の警告表示
+    if is_demo_mode:
+        st.warning("🚀 **現在デモモードで動作中**：架空の顧客データ（800件）と架空の現行料金表で集計しています。ご自身のデータを分析するには、左のサイドバーから「使用量CSV」と「マスタCSV」をアップロードしてください。")
+
     usage_ids = sorted(df_usage['料金表番号'].unique())
-    selected_ids = st.multiselect("料金表番号を選択", usage_ids, default=usage_ids[:1])
+    selected_ids = st.sidebar.multiselect("料金表番号を選択", usage_ids, default=usage_ids[:1])
 
     if not selected_ids:
         st.stop()
@@ -108,6 +128,21 @@ if df_usage is not None and df_master is not None:
     if len(set(fps_check.values())) > 1:
         st.error("⚠️ 境界線が不一致です。")
         st.stop()
+
+    # === 🌟 現行マスタの確認エリア ===
+    with st.expander("📋 現行の料金表マスタを確認する", expanded=False):
+        st.markdown("現在選択されている料金表マスタです。")
+        master_cols = st.columns(min(len(selected_ids), 3))
+        for idx, t_id in enumerate(selected_ids):
+            with master_cols[idx % 3]:
+                st.markdown(f"**【料金表番号: {t_id}】**")
+                target_df = df_master[df_master['料金表番号'] == t_id].copy()
+                st.dataframe(
+                    target_df[['MIN', 'MAX', '基本料金', '単位料金']].style.format({
+                        "MIN": "{:,.1f}", "MAX": "{:,.1f}", "基本料金": "¥{:,.2f}", "単位料金": "¥{:,.2f}"
+                    }), hide_index=True, use_container_width=True
+                )
+    # ==========================================
 
     # 集計
     df_target = df_usage[df_usage['料金表番号'].isin(selected_ids)].copy()
