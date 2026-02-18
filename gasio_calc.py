@@ -82,11 +82,11 @@ def calc_bill(usage, df_rates):
     target = df_rates[df_rates['適用上限(m3)'] >= (usage - 1e-9)]
     row = target.iloc[0] if not target.empty else df_rates.iloc[-1]
     # ガス料金は通常、小数点以下切り捨て
-    return int(row['基本料金'] + (usage * row['調整後単位料金']))
+    return int(row['基本料金'] + (usage * row['調整単位料金']))
 
 def generate_hayami_tables(df_rates, adj_rate):
     df = df_rates.copy()
-    df['調整後単位料金'] = df['単位料金'] + adj_rate
+    df['調整単位料金'] = df['単位料金'] + adj_rate
 
     # 表1: 0.0 ~ 40.9 (0.1刻み)
     t1 = []
@@ -127,7 +127,7 @@ def render_hayami_generator(df_base, base_col, unit_col, tab_key):
 
     st.markdown("**【適用される料金表（調整後）】**")
     st.dataframe(df_adj.style.format({
-        "適用上限(m3)": "{:,.1f}", "基本料金": "¥{:,.2f}", "単位料金": "¥{:,.2f}", "調整後単位料金": "¥{:,.2f}"
+        "適用上限(m3)": "{:,.1f}", "基本料金": "¥{:,.2f}", "単位料金": "¥{:,.2f}", "調整単位料金": "¥{:,.2f}"
     }), use_container_width=True, hide_index=True)
 
     # 早見表の表示設定
