@@ -58,8 +58,21 @@ COLOR_BAR, COLOR_CURRENT, COLOR_NEW = '#34495e', '#95a5a6', '#e67e22'
 def normalize_columns(df):
     rename_map = {'基本':'基本料金','基礎料金':'基本料金','Base':'基本料金','上限':'MAX','適用上限':'MAX','ID':'料金表番号','Usage':'使用量','調定':'調定数'}
     df = df.rename(columns=rename_map)
-    for c in ['使用量', 'MAX', '調定数']:
-        if c in df.columns: df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0 if c!='MAX' else 999999999.0)
+    for c in ['使用量', '調定数']:
+        if c in df.columns: df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0)
+    
+    # --- カンマや通貨記号の除去処理（ここを追加・更新） ---
+    for col in ['MIN', 'MAX', '基本料金', '単位料金']:
+        if col in df.columns:
+            if df[col].dtype == 'object':
+                df[col] = df[col].astype(str).str.replace(',', '', regex=False).str.replace('¥', '', regex=False).str.replace('￥', '', regex=False)
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+            if col == 'MAX':
+                df[col] = df[col].fillna(999999999.0)
+            else:
+                df[col] = df[col].fillna(0.0)
+    # --------------------------------------------------------
+                
     if '料金表番号' not in df.columns: df['料金表番号'] = 10
     return df
 
