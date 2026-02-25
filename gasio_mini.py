@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import numpy as np
+import io
 
 # ---------------------------------------------------------
 # 1. 設定 & デザイン (ロゴカラー修復済)
@@ -45,7 +46,7 @@ def normalize_columns(df):
     else:
         df['調定数'] = 1.0
         
-    # --- カンマや通貨記号の除去処理（これのみを追加・更新） ---
+    # --- カンマや通貨記号の除去処理 ---
     for col in ['MIN', 'MAX', '基本料金', '単位料金']:
         if col in df.columns:
             if df[col].dtype == 'object':
@@ -198,4 +199,18 @@ if df_usage is not None and df_master is not None:
 
         agg_df['構成比(調定)'] = (agg_df['調定数'] / total_count * 100).map('{:.1f}%'.format)
         agg_df['構成比(使用量)'] = (agg_df['総使用量'] / (total_vol if total_vol > 0 else 1) * 100).map('{:.1f}%'.format)
-        st.dataframe(agg_df[['Current_Tier', '調定数', '構成比(調定)', '総使用量', '構成比(使用量)']], hide_index=True, use_container_width=True)
+        
+        output_df = agg_df[['Current_Tier', '調定数', '構成比(調定)', '総使用量', '構成比(使用量)']]
+        st.dataframe(output_df, hide_index=True, use_container_width=True)
+
+        # 🌟 Excel出力機能の追加
+        buffer = io.BytesIO()
+        with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
+            output_df.to_excel(writer, index=False, sheet_name='需要構成率')
+        
+        st.download_button(
+            label="📥 Excelでダウンロード",
+            data=buffer.getvalue(),
+            file_name="demand_composition.xlsx",
+            mime="application/vnd.ms-excel"
+        )
