@@ -44,8 +44,17 @@ def normalize_columns(df):
         df['調定数'] = pd.to_numeric(df['調定数'], errors='coerce').fillna(0.0)
     else:
         df['調定数'] = 1.0
-    if 'MAX' in df.columns:
-        df['MAX'] = pd.to_numeric(df['MAX'], errors='coerce').fillna(999999999.0)
+        
+    # --- カンマや通貨記号の除去処理（これのみを追加・更新） ---
+    for col in ['MIN', 'MAX', '基本料金', '単位料金']:
+        if col in df.columns:
+            if df[col].dtype == 'object':
+                df[col] = df[col].astype(str).str.replace(',', '', regex=False).str.replace('¥', '', regex=False).str.replace('￥', '', regex=False)
+            if col == 'MAX':
+                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(999999999.0)
+            else:
+                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
+                
     return df
 
 def smart_load(file):
