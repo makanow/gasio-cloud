@@ -61,7 +61,7 @@ def normalize_columns(df):
     for c in ['使用量', '調定数']:
         if c in df.columns: df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0)
     
-    # --- カンマや通貨記号の除去処理（ここを追加・更新） ---
+    # --- カンマや通貨記号の除去処理 ---
     for col in ['MIN', 'MAX', '基本料金', '単位料金']:
         if col in df.columns:
             if df[col].dtype == 'object':
@@ -143,7 +143,7 @@ def get_tier_name(usage, tariff_df):
     return str(row.get('区画名', row.get('区画', row.name + 1)))
 
 # ---------------------------------------------------------
-# 3. サイドバー & データロード (デモデータ自動生成ロジック追加)
+# 3. サイドバー & データロード
 # ---------------------------------------------------------
 with st.sidebar:
     st.header("📂 Data Import")
@@ -184,7 +184,7 @@ with st.sidebar:
             '基本料金': [1800.0, 2600.0, 5600.0], '単位料金': [550.0, 450.0, 350.0],
             '料金表番号': [99, 99, 99], '区画': ['A', 'B', 'C']
         })
-        # デモ用使用量（ガンマ分布を使って、リアルなガス使用量の偏りを再現）
+        # デモ用使用量
         np.random.seed(42)
         demo_usages = np.round(np.random.gamma(shape=2.5, scale=6.0, size=800), 1)
         df_usage = pd.DataFrame({'使用量': demo_usages, '調定数': 1, '料金表番号': 99})
@@ -328,3 +328,40 @@ if df_usage is not None and df_master_all is not None and selected_ids:
             agg_n = df_target_usage.groupby('新区画').agg(件数=('調定数','sum'), 使用量=('使用量','sum')).reset_index()
             st.plotly_chart(px.pie(agg_n, values='件数', names='新区画', hole=0.5, color_discrete_sequence=CHIC_PIE_COLORS), use_container_width=True)
             st.dataframe(agg_n.style.format({"件数":"{:,.0f}", "使用量":"{:,.1f}"}), hide_index=True, use_container_width=True)
+
+    # ---------------------------------------------------------
+    # 5. エクスポート機能（サイドバーに総合レポート出力）
+    # ---------------------------------------------------------
+    if st.session_state.simulation_result is not None:
+        with st.sidebar:
+            st.markdown("---")
+            st.markdown("##### 📥 エクスポート")
+            
+            excel_buf = io.BytesIO()
+            with pd.ExcelWriter(excel_buf) as writer:
+                # 1_Summary（収支サマリー）
+                pd.DataFrame(summ_list).to_excel(writer, index=False, sheet_name='1_Summary')
+                
+                # 2_Plan_Design（新プランの設計内容）
+                plan_design_all = []
+                for p_name, p_df in new_plans.items():
+                    temp_df = p_df.copy()
+                    temp_df.insert(0, 'プラン名', p_name)
+                    plan_design_all.append(temp_df)
+                if plan_design_all:
+                    pd.concat(plan_design_all).to_excel(writer, index=False, sheet_name='2_Plan_Design')
+                
+                # 3_Current_Master（比較元の現行マスタ）
+                df_master_all[df_master_all['料金表番号'].isin(selected_ids)].to_excel(writer, index=False, sheet_name='3_Current_Master')
+                
+                # 4_Simulation_Result（全顧客の明細）
+                st.session_state.simulation_result.to_excel(writer, index=False, sheet_name='4_Simulation_Result')
+            
+            st.download_button(
+                label="📊 総合レポート(Excel)をDL",
+                data=excel_buf.getvalue(),
+                file_name=f"gasio_comprehensive_report_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                type="primary",
+                use_container_width=True
+            )
