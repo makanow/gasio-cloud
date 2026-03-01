@@ -4,7 +4,7 @@ import plotly.graph_objects as go
 import numpy as np
 
 # ---------------------------------------------------------
-# 1. 設定 & デザイン (Gasio Cloud Editionのスタイル踏襲)
+# 1. 設定 & デザイン
 # ---------------------------------------------------------
 st.set_page_config(page_title="Gasio Interactive", page_icon="🔥", layout="wide")
 
@@ -20,7 +20,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.markdown('<div class="main-title"><span style="color:#2c3e50">Gas</span><span style="color:#e74c3c">i</span><span style="color:#3498db">o</span> Interactive</div>', unsafe_allow_html=True)
-st.markdown('<div class="sub-title">料金設計シミュレーター (教材用)</div>', unsafe_allow_html=True)
+st.markdown('<div class="sub-title">料金設計シミュレーター (高解像度版)</div>', unsafe_allow_html=True)
 
 # ---------------------------------------------------------
 # 2. ステート管理 (初期データ)
@@ -42,7 +42,6 @@ def calculate_slide_rates(base_a, blocks_df):
     base_fees = {blocks.iloc[0]['No']: base_a}
     for i in range(1, len(blocks)):
         p, c = blocks.iloc[i-1], blocks.iloc[i]
-        # 前の区画の上限での料金が一致するように計算
         base_fees[c['No']] = base_fees[p['No']] + (p['単位料金'] - c['単位料金']) * p['適用上限(m3)']
     return base_fees
 
@@ -52,7 +51,6 @@ def calc_fee_at_usage(usage, base_a, blocks_df):
     for _, row in blocks_df.iterrows():
         if usage <= row['適用上限(m3)']:
             return bases[row['No']] + (usage * row['単位料金'])
-    # 99999.0を超えた場合（フェイルセーフ）
     last_row = blocks_df.iloc[-1]
     return bases[last_row['No']] + (usage * last_row['単位料金'])
 
@@ -82,28 +80,42 @@ fig.add_trace(go.Scatter(x=x_vals, y=y_p1, mode='lines', name='Plan 1', line=dic
 # Plan 2 の折れ線
 fig.add_trace(go.Scatter(x=x_vals, y=y_p2, mode='lines', name='Plan 2', line=dict(color='#e74c3c', width=3)))
 
-# 区画の境界線（縦の点線）を描画（Plan 1基準）
-for _, row in st.session_state.plans["Plan 1"].iterrows():
-    if row['適用上限(m3)'] < 80:
-        fig.add_vline(x=row['適用上限(m3)'], line_width=1, line_dash="dash", line_color="#bdc3c7", annotation_text=f"{row['区画名']}区画上限")
+# 【追加】Plan 1 の区画の切れ目（ブレイクポイント）に丸いハンドルを描画
+bp_x1 = [row['適用上限(m3)'] for _, row in st.session_state.plans["Plan 1"].iterrows() if row['適用上限(m3)'] <= 80]
+bp_y1 = [calc_fee_at_usage(x, st.session_state.base_fee["Plan 1"], st.session_state.plans["Plan 1"]) for x in bp_x1]
+if bp_x1:
+    fig.add_trace(go.Scatter(x=bp_x1, y=bp_y1, mode='markers', name='Plan 1 境界', 
+                             marker=dict(color='#3498db', size=16, line=dict(color='white', width=3)), hoverinfo='skip'))
+
+# 【追加】Plan 2 の区画の切れ目（ブレイクポイント）に丸いハンドルを描画
+bp_x2 = [row['適用上限(m3)'] for _, row in st.session_state.plans["Plan 2"].iterrows() if row['適用上限(m3)'] <= 80]
+bp_y2 = [calc_fee_at_usage(x, st.session_state.base_fee["Plan 2"], st.session_state.plans["Plan 2"]) for x in bp_x2]
+if bp_x2:
+    fig.add_trace(go.Scatter(x=bp_x2, y=bp_y2, mode='markers', name='Plan 2 境界', 
+                             marker=dict(color='#e74c3c', size=16, line=dict(color='white', width=3)), hoverinfo='skip'))
 
 # 使用量スライダーの現在位置の縦線と交点マーカー
 fig.add_vline(x=current_usage, line_width=2, line_dash="dot", line_color="#2c3e50")
-fig.add_trace(go.Scatter(x=[current_usage], y=[fee_p1], mode='markers', marker=dict(color='#3498db', size=12, symbol='circle'), showlegend=False))
-fig.add_trace(go.Scatter(x=[current_usage], y=[fee_p2], mode='markers', marker=dict(color='#e74c3c', size=12, symbol='circle'), showlegend=False))
+fig.add_trace(go.Scatter(x=[current_usage], y=[fee_p1], mode='markers', marker=dict(color='#2c3e50', size=12, symbol='circle-open', line=dict(width=3)), showlegend=False))
+fig.add_trace(go.Scatter(x=[current_usage], y=[fee_p2], mode='markers', marker=dict(color='#2c3e50', size=12, symbol='circle-open', line=dict(width=3)), showlegend=False))
 
+# 【修正】Y軸を20,000円までに固定して解像度をアップ
 fig.update_layout(
     title="📈 料金カーブ比較",
     xaxis_title="ガス使用量 (m³)",
     yaxis_title="ガス料金 (円)",
-    height=450,
+    yaxis=dict(range=[0, 20000]), # Y軸を0〜2万に固定
+    xaxis=dict(range=[0, 80]),    # X軸を0〜80に固定
+    height=500,
     margin=dict(l=0, r=0, t=40, b=0),
     hovermode="x unified"
 )
-st.plotly_chart(fig, use_container_width=True)
+
+# config={'displayModeBar': False} を入れると余計なメニューが消えてよりアプリっぽくなる
+st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
 
 st.markdown("---")
-st.markdown("##### 🛠️ 料金表パラメータの変更 (グラフに即時反映)")
+st.markdown("##### 🛠️ 料金表パラメータの変更 (下の表をいじると上のグラフのハンドルが動きます)")
 
 # --- パラメータエディタ ---
 col1, col2 = st.columns(2)
