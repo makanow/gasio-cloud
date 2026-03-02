@@ -251,9 +251,18 @@ with tab2:
         
         if unit_a_rev != st.session_state.last_unit_a or not edited_rev.equals(current_df_rev[['No', '区画名', '適用上限(m3)', '基本料金(入力)', '単位料金(算出)']]):
             st.session_state.last_unit_a = unit_a_rev
-            st.session_state.calc_data.update(edited_rev)
-            if len(edited_rev) != len(st.session_state.calc_data):
-                st.session_state.calc_data = stabilize_dataframe(edited_rev, unit_a_rev, mode='rev')
+            
+            # データフレームを安全にコピーして結合
+            new_df = st.session_state.calc_data.copy()
+            if len(edited_rev) != len(new_df):
+                new_df = edited_rev.copy()
+                new_df['単位料金(入力)'] = 0.0
+                new_df['基本料金(算出)'] = 0.0
+            else:
+                new_df.update(edited_rev)
+                
+            # ★ポイント：行の増減に関わらず、セルの変更があれば必ず再計算を実行する
+            st.session_state.calc_data = stabilize_dataframe(new_df, unit_a_rev, mode='rev')
             st.rerun()
 
     with c2:
