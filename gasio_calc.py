@@ -145,14 +145,12 @@ def render_hayami_generator(df_base, base_col, unit_col, tab_key):
 
         # --- Excelダウンロード機能 ---
         output = io.BytesIO()
-        # engine='xlsxwriter' または 'openpyxl' が必要です（多くのStreamlit環境にはどちらか入っています）
         try:
             with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
                 df_adj.to_excel(writer, index=False, sheet_name='1. 適用料金表')
                 df_t1.to_excel(writer, index=False, sheet_name='2. 早見表(0.0-40.9)')
                 df_t2.to_excel(writer, index=False, sheet_name='3. 早見表(40-209)')
         except ValueError:
-            # xlsxwriterが無い場合は openpyxl でフォールバック
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
                 df_adj.to_excel(writer, index=False, sheet_name='1. 適用料金表')
                 df_t1.to_excel(writer, index=False, sheet_name='2. 早見表(0.0-40.9)')
@@ -167,7 +165,7 @@ def render_hayami_generator(df_base, base_col, unit_col, tab_key):
             file_name=f"ガス料金早見表_調整単価{adj_rate}円.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             type="primary",
-            key=f"dl_excel_{tab_key}" # タブごとのキー被りを防止
+            key=f"dl_excel_{tab_key}" 
         )
 
 # ---------------------------------------------------------
@@ -205,11 +203,17 @@ with tab1:
             num_rows="dynamic", use_container_width=True, key="editor_fwd"
         )
         
+        # 修正箇所: セル変更時にも必ず stabilize_dataframe を走らせる
         if base_a_fwd != st.session_state.last_base_a or not edited_fwd.equals(current_df[['No', '区画名', '適用上限(m3)', '単位料金(入力)', '基本料金(算出)']]):
             st.session_state.last_base_a = base_a_fwd
-            st.session_state.calc_data.update(edited_fwd)
-            if len(edited_fwd) != len(st.session_state.calc_data):
-                 st.session_state.calc_data = stabilize_dataframe(edited_fwd, base_a_fwd, mode='fwd')
+            
+            new_df = st.session_state.calc_data.copy()
+            if len(edited_fwd) != len(new_df):
+                new_df = edited_fwd.copy()
+            else:
+                new_df.update(edited_fwd)
+                
+            st.session_state.calc_data = stabilize_dataframe(new_df, base_a_fwd, mode='fwd')
             st.rerun()
 
     with c2:
@@ -224,7 +228,6 @@ with tab1:
                 use_container_width=True
             )
 
-    # 早見表ジェネレーター呼び出し
     if not edited_fwd.empty:
         render_hayami_generator(edited_fwd, base_col='基本料金(算出)', unit_col='単位料金(入力)', tab_key='fwd')
 
@@ -249,19 +252,16 @@ with tab2:
             num_rows="dynamic", use_container_width=True, key="editor_rev"
         )
         
+        # 修正箇所: セル変更時にも必ず stabilize_dataframe を走らせる
         if unit_a_rev != st.session_state.last_unit_a or not edited_rev.equals(current_df_rev[['No', '区画名', '適用上限(m3)', '基本料金(入力)', '単位料金(算出)']]):
             st.session_state.last_unit_a = unit_a_rev
             
-            # データフレームを安全にコピーして結合
             new_df = st.session_state.calc_data.copy()
             if len(edited_rev) != len(new_df):
                 new_df = edited_rev.copy()
-                new_df['単位料金(入力)'] = 0.0
-                new_df['基本料金(算出)'] = 0.0
             else:
                 new_df.update(edited_rev)
                 
-            # ★ポイント：行の増減に関わらず、セルの変更があれば必ず再計算を実行する
             st.session_state.calc_data = stabilize_dataframe(new_df, unit_a_rev, mode='rev')
             st.rerun()
 
@@ -275,6 +275,5 @@ with tab2:
                     '基本料金(入力)': "{:,.2f}"
                 }), use_container_width=True)
 
-    # 早見表ジェネレーター呼び出し
     if not edited_rev.empty:
         render_hayami_generator(edited_rev, base_col='基本料金(入力)', unit_col='単位料金(算出)', tab_key='rev')
