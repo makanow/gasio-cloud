@@ -46,7 +46,8 @@ def solve_unit(df, unit_a):
     for i in range(1, len(sorted_df)):
         prev, curr = sorted_df.iloc[i-1], sorted_df.iloc[i]
         if prev['適用上限(m3)'] != 0:
-            units[curr['No']] = units[prev['No']] - (curr['基本料金(入力)'] - prev['基本料金(入力)']) * prev['適用上限(m3)']
+            # 【致命的バグ修正】 掛け算（*）になっていたのを、割り算（/）に修正！
+            units[curr['No']] = units[prev['No']] - (curr['基本料金(入力)'] - prev['基本料金(入力)']) / prev['適用上限(m3)']
         else:
             units[curr['No']] = units[prev['No']]
     return units
@@ -70,9 +71,13 @@ def stabilize_dataframe(df, start_val, mode='fwd'):
     if mode == 'fwd':
         res = solve_base(df, start_val)
         df['基本料金(算出)'] = df['No'].map(res)
+        # 【追加】 タブを切り替えてもデータが引き継がれるように相互同期
+        df['基本料金(入力)'] = df['基本料金(算出)']
     else:
         res = solve_unit(df, start_val)
         df['単位料金(算出)'] = df['No'].map(res)
+        # 【追加】 タブを切り替えてもデータが引き継がれるように相互同期
+        df['単位料金(入力)'] = df['単位料金(算出)']
         
     return df
 
@@ -82,7 +87,6 @@ def stabilize_dataframe(df, start_val, mode='fwd'):
 def calc_bill(usage, df_rates):
     target = df_rates[df_rates['適用上限(m3)'] >= (usage - 1e-9)]
     row = target.iloc[0] if not target.empty else df_rates.iloc[-1]
-    # ガス料金は通常、小数点以下切り捨て
     return int(row['基本料金'] + (usage * row['調整単位料金']))
 
 def generate_hayami_tables(df_rates, adj_rate):
@@ -113,7 +117,6 @@ def generate_hayami_tables(df_rates, adj_rate):
 def render_hayami_generator(df_base, base_col, unit_col, tab_key):
     st.markdown("---")
     
-    # st.expander で全体を包み、デフォルトを折りたたみに設定
     with st.expander("📄 ガス料金早見表 ジェネレーター（クリックで展開）", expanded=False):
         st.markdown("算出された基本料金・単位料金に**「原料費調整単価」**を加減算し、実運用向けの早見表を自動生成します。")
         
@@ -121,11 +124,9 @@ def render_hayami_generator(df_base, base_col, unit_col, tab_key):
         with col_in:
             adj_rate = st.number_input("⚡ 原料費調整単価 (円/m³)", value=0.00, step=0.10, format="%.2f", key=f"adj_{tab_key}")
 
-        # データ整形
         calc_df = df_base[['区画名', '適用上限(m3)', base_col, unit_col]].copy()
         calc_df.columns = ['区画名', '適用上限(m3)', '基本料金', '単位料金']
         
-        # 表生成
         df_t1, df_t2, df_adj = generate_hayami_tables(calc_df, adj_rate)
 
         st.markdown("**【適用される料金表（調整後）】**")
@@ -133,7 +134,6 @@ def render_hayami_generator(df_base, base_col, unit_col, tab_key):
             "適用上限(m3)": "{:,.1f}", "基本料金": "¥{:,.2f}", "単位料金": "¥{:,.2f}", "調整単位料金": "¥{:,.2f}"
         }), use_container_width=True, hide_index=True)
 
-        # 早見表の表示設定
         fmt1 = {col: "{:,.0f}" for col in df_t1.columns if col != "m³"}
         fmt2 = {col: "{:,.0f}" for col in df_t2.columns if col != "m³"}
 
@@ -143,7 +143,6 @@ def render_hayami_generator(df_base, base_col, unit_col, tab_key):
         st.markdown('<div class="hayami-header">▼ 早見表 ②（40m³ 〜 209m³）※1.0m³刻み</div>', unsafe_allow_html=True)
         st.dataframe(df_t2.style.format(fmt2, na_rep="-").hide(axis="index"), use_container_width=True)
 
-        # --- Excelダウンロード機能 ---
         output = io.BytesIO()
         try:
             with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
@@ -203,17 +202,21 @@ with tab1:
             num_rows="dynamic", use_container_width=True, key="editor_fwd"
         )
         
-        # 修正箇所: セル変更時にも必ず stabilize_dataframe を走らせる
-        if base_a_fwd != st.session_state.last_base_a or not edited_fwd.equals(current_df[['No', '区画名', '適用上限(m3)', '単位料金(入力)', '基本料金(算出)']]):
+        # 修正: セルの入力項目だけを監視して無限ループを防ぎつつ確実に再計算する
+        input_cols_fwd = ['区画名', '適用上限(m3)', '単位料金(入力)']
+        if base_a_fwd != st.session_state.last_base_a or not edited_fwd[input_cols_fwd].equals(current_df[input_cols_fwd]):
             st.session_state.last_base_a = base_a_fwd
             
             new_df = st.session_state.calc_data.copy()
             if len(edited_fwd) != len(new_df):
                 new_df = edited_fwd.copy()
+                new_df['基本料金(入力)'] = 0.0 # ダミー値、後で同期される
             else:
                 new_df.update(edited_fwd)
                 
             st.session_state.calc_data = stabilize_dataframe(new_df, base_a_fwd, mode='fwd')
+            # 逆算用タブのスタート地点も同期
+            st.session_state.last_unit_a = st.session_state.calc_data.iloc[0]['単位料金(入力)']
             st.rerun()
 
     with c2:
@@ -252,17 +255,21 @@ with tab2:
             num_rows="dynamic", use_container_width=True, key="editor_rev"
         )
         
-        # 修正箇所: セル変更時にも必ず stabilize_dataframe を走らせる
-        if unit_a_rev != st.session_state.last_unit_a or not edited_rev.equals(current_df_rev[['No', '区画名', '適用上限(m3)', '基本料金(入力)', '単位料金(算出)']]):
+        # 修正: セルの入力項目だけを監視して無限ループを防ぎつつ確実に再計算する
+        input_cols_rev = ['区画名', '適用上限(m3)', '基本料金(入力)']
+        if unit_a_rev != st.session_state.last_unit_a or not edited_rev[input_cols_rev].equals(current_df_rev[input_cols_rev]):
             st.session_state.last_unit_a = unit_a_rev
             
             new_df = st.session_state.calc_data.copy()
             if len(edited_rev) != len(new_df):
                 new_df = edited_rev.copy()
+                new_df['単位料金(入力)'] = 0.0 # ダミー値、後で同期される
             else:
                 new_df.update(edited_rev)
                 
             st.session_state.calc_data = stabilize_dataframe(new_df, unit_a_rev, mode='rev')
+            # 順算用タブのスタート地点も同期
+            st.session_state.last_base_a = st.session_state.calc_data.iloc[0]['基本料金(入力)']
             st.rerun()
 
     with c2:
