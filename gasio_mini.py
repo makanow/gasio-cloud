@@ -124,8 +124,8 @@ with st.sidebar:
         st.download_button("📥 マスタサンプルCSV", get_sample_master_csv(), "sample_master.csv", "text/csv")
         
     st.markdown("---")
-    file_usage = st.file_uploader("1. 使用量CSV (実績)", type=['csv'])
-    file_master = st.file_uploader("2. 料金表マスタCSV (定義)", type=['csv'])
+    file_usage = st.file_uploader("1. 使用量CSV", type=['csv'])
+    file_master = st.file_uploader("2. 料金表マスタCSV ", type=['csv'])
 
 # 🌟 データ読み込みとデモモードの判定
 df_master = None
