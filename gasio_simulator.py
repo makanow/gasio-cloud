@@ -25,7 +25,7 @@ st.markdown("""
         border-right: 5px solid #fdd835 !important;
         background-color: #fffde7 !important;
     }
-    /* ガイダンス用スタイル */
+    /* 追加：インポートガイダンス用スタイル */
     .import-guide { background-color: #f1f5f9; border-left: 4px solid #3498db; padding: 10px; margin-bottom: 20px; font-size: 0.85rem; }
     </style>
 """, unsafe_allow_html=True)
@@ -53,15 +53,15 @@ def calc_bill(usage, base, tiers_list):
     return base + (usage * tiers_list[-1]['price'])
 
 # ---------------------------------------------------------
-# 3. サイドバー: データ読み込み & インポートガイダンス
+# 3. サイドバー: データ読み込み
 # ---------------------------------------------------------
 with st.sidebar:
     st.header("📂 Data Input")
     
-    # 指示2: インポートガイダンス (data_managerの構成を反映)
+    # 指示2: インポートガイダンス
     st.markdown("""
     <div class="import-guide">
-        <strong>💡 インポート形式</strong><br>
+        <strong>💡 インポート形式 (推奨)</strong><br>
         1. 料金表マスター<br>
         [料金表番号, MIN, MAX, 基本料金, 単価]<br>
         2. 使用量CSV<br>
@@ -88,7 +88,7 @@ with st.sidebar:
         p_val = c2.number_input(f"単価(円)", value=600-(i*50), key=f"p_{i}")
         new_tiers_list.append({"min": 0 if i==0 else new_tiers_list[i-1]['max']+0.1, "max": l_val, "price": p_val})
 
-    # 指示3: 「設定の復元(JSON)」および「設定の保存」ボタンを廃止
+    # 指示3: 設定保存と設定復元ボタンを廃止
 
 # ---------------------------------------------------------
 # 4. メイン処理
@@ -97,7 +97,7 @@ if file_m and file_u:
     df_master_all = pd.read_csv(file_m)
     df_usage_raw = pd.read_csv(file_u)
 
-    # 指示1: 不要なカラムを排除 (調定数は維持、取り付け数等は除外)
+    # 指示1: 不要なカラムを排除 (調定数は維持)
     needed_cols = ['料金表番号', '使用量', '調定数']
     df_usage_all = df_usage_raw[[c for c in needed_cols if c in df_usage_raw.columns]].copy()
 
@@ -113,7 +113,7 @@ if file_m and file_u:
             m = df_master_all[df_master_all['料金表番号'].astype(str) == str(row['料金表番号'])].sort_values('MIN')
             for _, r in m.iterrows():
                 if r['MIN'] <= row['使用量'] <= r['MAX']:
-                    return (r['基本料金'] + (row['使用量'] * r['単価'])) * row['調定数']
+                    return (r['基本料金'] + (row['使用量'] * r['調価'])) * row['調定数'] if '調価' in r else (r['基本料金'] + (row['使用量'] * r['単価'])) * row['調定数']
             return 0
 
         df_target_usage['現行料金'] = df_target_usage.apply(get_current, axis=1)
@@ -146,12 +146,11 @@ if file_m and file_u:
                 st.plotly_chart(px.pie(agg_c, values='件数', names='現行区画', hole=0.5, color_discrete_sequence=CHIC_PIE_COLORS), use_container_width=True)
                 st.dataframe(agg_c.style.format({"使用量":"{:,.1f}"}), hide_index=True, use_container_width=True)
             else:
-                st.info("⚠️ 異なる区画の料金表が混在しているため、分布図を表示")
+                st.info("⚠️ 分布図を表示")
                 st.plotly_chart(px.histogram(df_target_usage, x="使用量", color="料金表番号", nbins=50, color_discrete_sequence=CHIC_PIE_COLORS), use_container_width=True)
                 
         with g2:
             st.markdown(f"**Proposal: {sel_p}構成**")
-            # 新区画ラベル
             def get_new_tier_label(u):
                 for t in new_tiers_list:
                     if t['min'] <= u <= t['max']: return f"{t['min']}~{t['max']}"
