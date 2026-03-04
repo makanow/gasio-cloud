@@ -4,364 +4,169 @@ import plotly.express as px
 import plotly.graph_objects as go
 import numpy as np
 import io
-import json
 import datetime
 
 # ---------------------------------------------------------
 # 1. 設定 & デザイン
 # ---------------------------------------------------------
-st.set_page_config(page_title="Gasio計算機", page_icon="🔥", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="Gasio Simulator Pro", page_icon="🔥", layout="wide")
 
 st.markdown("""
     <style>
-    .block-container { padding-top: 2rem; font-family: "Helvetica Neue", Arial, sans-serif; }
-    .main-title { font-size: 3rem; font-weight: 800; color: #2c3e50; margin-bottom: 0px; letter-spacing: -1px; }
-    .sub-title { font-size: 1.2rem; color: #7f8c8d; margin-top: -5px; margin-bottom: 20px; border-bottom: 2px solid #3498db; padding-bottom: 10px; }
-    
-    [data-testid="stMetricValue"] { font-size: 1.3rem !important; overflow-wrap: break-word; }
-    [data-testid="stMetricLabel"] { font-size: 0.8rem !important; }
-
-    [data-testid="stDataEditor"] div[data-testid="stTable"] td[aria-readonly="false"] {
-        border-right: 5px solid #fdd835 !important;
-        background-color: #fffde7 !important;
-    }
-
-    .stMetric {
-        background-color: #fdfdfd;
-        padding: 10px 15px;
-        border-radius: 6px;
-        border-left: 5px solid #3498db;
-        box-shadow: 0 2px 5px rgba(0,0,0,0.05);
-    }
-    div.stButton > button { font-weight: bold; border-radius: 4px; }
+    .main-title { font-size: 2.5rem; font-weight: 800; color: #2c3e50; margin-bottom: 0px; }
+    .sub-title { font-size: 1rem; color: #7f8c8d; margin-bottom: 20px; border-bottom: 2px solid #3498db; padding-bottom: 5px; }
+    .demo-badge { background-color: #9b59b6; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.8rem; font-weight: bold; }
     </style>
 """, unsafe_allow_html=True)
 
-c_head1, c_head2 = st.columns([3, 1])
-with c_head1:
-    st.markdown('<div class="main-title"><span style="color:#2c3e50">Gas</span><span style="color:#e74c3c">i</span><span style="color:#3498db">o</span> 計算機</div>', unsafe_allow_html=True)
-    st.markdown('<div class="sub-title">Cloud Edition - Rate Simulation System</div>', unsafe_allow_html=True)
-
-# --- ステート管理 ---
-if 'simulation_result' not in st.session_state: st.session_state.simulation_result = None
-if 'plan_data' not in st.session_state:
-    d_df = pd.DataFrame({'No': [1, 2, 3], '区画名': ['A', 'B', 'C'], '適用上限(m3)': [8.0, 30.0, 99999.0], '単位料金': [500.0, 400.0, 300.0]})
-    st.session_state.plan_data = {i: d_df.copy() for i in range(3)} 
-    st.session_state.base_a = {i: 1500.0 for i in range(3)} 
-
-CHIC_PIE_COLORS = ['#88a0b9', '#aab7b8', '#82e0aa', '#f5b7b1', '#d7bde2', '#f9e79f']
-COLOR_BAR, COLOR_CURRENT, COLOR_NEW = '#34495e', '#95a5a6', '#e67e22'
+st.markdown('<div class="main-title"><span style="color:#2c3e50">Gas</span><span style="color:#e74c3c">i</span><span style="color:#3498db">o</span> Simulator Pro</div>', unsafe_allow_html=True)
+st.markdown('<div class="sub-title">高度料金シミュレーション & 個別影響分析</div>', unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# 2. 関数定義
+# 2. 関数定義 (デモデータ生成)
 # ---------------------------------------------------------
-def normalize_columns(df):
-    rename_map = {'基本':'基本料金','基礎料金':'基本料金','Base':'基本料金','上限':'MAX','適用上限':'MAX','ID':'料金表番号','Usage':'使用量','調定':'調定数'}
-    df = df.rename(columns=rename_map)
-    for c in ['使用量', '調定数']:
-        if c in df.columns: df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0)
+def generate_demo_data():
+    """テスト用のダミーデータを生成"""
+    # 料金表マスター(デモ)
+    master_data = [
+        {"料金表番号": "1", "料金表名": "標準プラン(デモ)", "MIN": 0.0, "MAX": 10.0, "基本料金": 1000, "単価": 600},
+        {"料金表番号": "1", "料金表名": "標準プラン(デモ)", "MIN": 10.1, "MAX": 999.0, "基本料金": 1500, "単価": 550},
+        {"料金表番号": "2", "料金表名": "エコプラン(デモ)", "MIN": 0.0, "MAX": 20.0, "基本料金": 1200, "単価": 580},
+        {"料金表番号": "2", "料金表名": "エコプラン(デモ)", "MIN": 20.1, "MAX": 999.0, "基本料金": 2000, "単価": 500}
+    ]
+    df_m = pd.DataFrame(master_data)
     
-    # --- カンマや通貨記号の除去処理 ---
-    for col in ['MIN', 'MAX', '基本料金', '単位料金']:
-        if col in df.columns:
-            if df[col].dtype == 'object':
-                df[col] = df[col].astype(str).str.replace(',', '', regex=False).str.replace('¥', '', regex=False).str.replace('￥', '', regex=False)
-            df[col] = pd.to_numeric(df[col], errors='coerce')
-            if col == 'MAX':
-                df[col] = df[col].fillna(999999999.0)
-            else:
-                df[col] = df[col].fillna(0.0)
-    # --------------------------------------------------------
-                
-    if '料金表番号' not in df.columns: df['料金表番号'] = 10
-    return df
+    # 請求データ(デモ: 150件)
+    usage_data = []
+    for i in range(1, 151):
+        p_id = "1" if i <= 100 else "2"
+        base_u = 15.0 + np.random.rand() * 20.0
+        # 5人目だけ異常に使う（アラート用）
+        if i == 5: base_u = 80.0
+        usage_data.append({"料金番号": f"MTR-{i:04d}", "料金表番号": p_id, "使用量": base_u, "調定数": 1})
+    df_u = pd.DataFrame(usage_data)
+    
+    return df_m, df_u
 
-def load_ratemake_format(file, extract_type='master'):
-    file.seek(0)
-    content = file.getvalue()
-    try: text = content.decode('cp932'); encoding = 'cp932'
-    except: text = content.decode('utf-8', errors='ignore'); encoding = 'utf-8'
-    lines = text.split('\n')
-    if extract_type == 'master':
-        header_idx = -1
-        for i, line in enumerate(lines):
-            if "調整単位" in line or "旧料金表" in line: header_idx = i; break
-        if header_idx == -1: return None 
-        file.seek(0)
-        try:
-            df_raw = pd.read_csv(file, header=header_idx, encoding=encoding)
-            unit_col = [c for c in df_raw.columns if "調整単位" in str(c)]
-            if not unit_col: return None
-            u_idx = df_raw.columns.get_loc(unit_col[0])
-            master_rows = []
-            for i in range(len(df_raw)):
-                row = df_raw.iloc[i]
-                if pd.isna(row.iloc[u_idx]): break
-                master_rows.append(row.iloc[[u_idx-3, u_idx-2, u_idx-1, u_idx]].values)
-            df_m = pd.DataFrame(master_rows, columns=['MIN', 'MAX', '基本料金', '単位料金'])
-            df_m['料金表番号'] = 10; df_m['区画'] = ['A','B','C','D','E'][:len(df_m)]
-            return df_m.astype(float)
-        except: return None
-    return None
+def calc_bill(usage, base, tiers_df):
+    """新料金計算ロジック"""
+    if usage == 0: return base
+    # Pythonでの計算を高速化するため、適切な単価を抽出
+    for idx, row in tiers_df.iterrows():
+        if row['MIN'] <= usage <= row['MAX']:
+            return base + (usage * row['単価'])
+    # 該当なし（上限超え）は最終行の単価を適用
+    return base + (usage * tiers_df.iloc[-1]['単価'])
 
-def smart_load_wrapper(file, file_type='generic'):
-    df_rm = load_ratemake_format(file, extract_type=file_type)
-    if df_rm is not None: return df_rm
-    for enc in ['cp932', 'utf-8', 'shift_jis']:
-        try:
-            file.seek(0); df = pd.read_csv(file, encoding=enc)
-            df.columns = df.columns.astype(str).str.strip()
-            return normalize_columns(df)
-        except: continue
-    return None
-
-def calculate_slide_rates(base_a, blocks_df):
-    blocks = blocks_df.copy().sort_values('No')
-    base_fees = {blocks.iloc[0]['No']: base_a}
-    for i in range(1, len(blocks)):
-        p, c = blocks.iloc[i-1], blocks.iloc[i]
-        base_fees[c['No']] = base_fees[p['No']] + (p['単位料金'] - c['単位料金']) * p['適用上限(m3)']
-    return base_fees
-
-def calculate_bill_single(usage, tariff_df, billing_count=1):
-    if billing_count == 0 or tariff_df.empty: return 0
-    df = tariff_df.copy()
-    if '適用上限(m3)' in df.columns: df = df.rename(columns={'適用上限(m3)':'MAX'})
-    df['MAX'] = pd.to_numeric(df['MAX'], errors='coerce').fillna(999999999.0)
-    target = df[df['MAX'] >= (usage - 1e-9)].sort_values('MAX')
-    row = target.iloc[0] if not target.empty else df.sort_values('MAX').iloc[-1]
-    return int(row.get('基本料金', 0) + (usage * row['単位料金']))
-
-def get_tier_name(usage, tariff_df):
-    if tariff_df.empty: return "Unknown"
-    df = tariff_df.copy()
-    if '適用上限(m3)' in df.columns: df = df.rename(columns={'適用上限(m3)':'MAX'})
-    df['MAX'] = pd.to_numeric(df['MAX'], errors='coerce').fillna(999999999.0)
-    sorted_df = df.sort_values('MAX').reset_index(drop=True)
-    applicable = sorted_df[sorted_df['MAX'] >= (usage - 1e-9)]
-    row = applicable.iloc[0] if not applicable.empty else sorted_df.iloc[-1]
-    return str(row.get('区画名', row.get('区画', row.name + 1)))
+def get_current_bill(usage, p_id, df_master):
+    """現行料金計算"""
+    tiers = df_master[df_master['料金表番号'] == p_id].sort_values('MIN')
+    if tiers.empty: return 0
+    for idx, row in tiers.iterrows():
+        if row['MIN'] <= usage <= row['MAX']:
+            return row['基本料金'] + (usage * row['単価'])
+    return tiers.iloc[-1]['基本料金'] + (usage * tiers.iloc[-1]['単価'])
 
 # ---------------------------------------------------------
-# 3. サイドバー & データロード
+# 3. サイドバー・データ読み込み
 # ---------------------------------------------------------
 with st.sidebar:
-    st.header("📂 Data Import")
-    uploaded_config = st.file_uploader("📂 設定復元 (.json)", type=['json'], key="cfg")
-    if uploaded_config:
-        try:
-            data = json.load(uploaded_config)
-            st.session_state.plan_data = {int(k): pd.DataFrame(v) for k, v in data['plan_data'].items()}
-            st.session_state.base_a = {int(k): v for k, v in data['base_a'].items()}
-            st.success("復元しました")
-        except: st.error("復元エラー")
+    st.header("📂 データ入力")
+    use_demo = st.checkbox("✨ デモモードを使用", value=False)
     
-    st.markdown("---")
-    file_usage = st.file_uploader("1. 使用量CSV", type=['csv'], key="u")
-    file_master = st.file_uploader("2. 料金表マスタCSV", type=['csv'], key="m")
+    if not use_demo:
+        file_m = st.file_uploader("1. 料金表マスター(CSV)", type="csv")
+        file_u = st.file_uploader("2. 請求データ(CSV)", type="csv")
     
-    # 🌟 データ読み込みとデモモードの判定
-    df_master_all = None
-    df_usage = None
-    selected_ids = []
-    is_demo_mode = True
-
-    if file_master and file_usage:
-        tmp_master = smart_load_wrapper(file_master, 'master')
-        tmp_usage = smart_load_wrapper(file_usage, 'usage')
-        if tmp_master is not None and tmp_usage is not None:
-            df_master_all = tmp_master
-            df_usage = tmp_usage
-            is_demo_mode = False
-            u_ids = sorted(df_master_all['料金表番号'].unique())
-            selected_ids = st.multiselect("対象料金表", u_ids, default=u_ids)
-
-    if is_demo_mode:
-        st.info("💡 CSV未設定のため、デモデータ読込中")
-        # デモ用マスタ
-        df_master_all = pd.DataFrame({
-            'MIN': [0.0, 8.0, 30.0], 'MAX': [8.0, 30.0, 999999999.0],
-            '基本料金': [1800.0, 2600.0, 5600.0], '単位料金': [550.0, 450.0, 350.0],
-            '料金表番号': [99, 99, 99], '区画': ['A', 'B', 'C']
-        })
-        # デモ用使用量
-        np.random.seed(42)
-        demo_usages = np.round(np.random.gamma(shape=2.5, scale=6.0, size=800), 1)
-        df_usage = pd.DataFrame({'使用量': demo_usages, '調定数': 1, '料金表番号': 99})
-        selected_ids = [99]
-
-    st.markdown("---")
-    save_json_data = json.dumps({'plan_data': {k: v.to_dict(orient='records') for k, v in st.session_state.plan_data.items()}, 'base_a': st.session_state.base_a}, indent=2, ensure_ascii=False)
-    st.download_button("💾 設定保存(.json)", save_json_data, f"gasio_config_{datetime.datetime.now().strftime('%Y%m%d')}.json")
+    st.divider()
+    st.header("⚙️ 新料金設定")
+    new_base = st.number_input("新・基本料金 (円)", value=2000, step=100)
+    
+    # 動的な区画設定
+    num_tiers = st.slider("新料金の区画数", 1, 5, 3)
+    new_tiers_list = []
+    for i in range(num_tiers):
+        c1, c2 = st.columns(2)
+        with c1:
+            limit = st.number_input(f"区画{i+1}上限(m3)", value=(i+1)*10.0 if i < num_tiers-1 else 999.0, key=f"lim_{i}")
+        with c2:
+            price = st.number_input(f"区画{i+1}単価(円)", value=600-(i*50), key=f"prc_{i}")
+        new_tiers_list.append({"MIN": 0 if i==0 else new_tiers_list[i-1]["MAX"]+0.1, "MAX": limit, "単価": price})
+    df_new_tiers = pd.DataFrame(new_tiers_list)
 
 # ---------------------------------------------------------
-# 4. メインエリア
+# 4. メイン処理
 # ---------------------------------------------------------
-if df_usage is not None and df_master_all is not None and selected_ids:
-    df_target_usage = df_usage[df_usage['料金表番号'].isin(selected_ids)].copy()
+df_master_all, df_usage_all = None, None
+
+if use_demo:
+    df_master_all, df_usage_all = generate_demo_data()
+    st.info("💡 現在デモモードで動作中です。")
+elif file_m and file_u:
+    df_master_all = pd.read_csv(file_m)
+    df_usage_all = pd.read_csv(file_u)
+
+if df_master_all is not None and df_usage_all is not None:
+    # --- 計算実行 ---
+    # 現行料金の計算
+    df_usage_all['現行料金'] = df_usage_all.apply(lambda x: get_current_bill(x['使用量'], str(x['料金表番号']), df_master_all), axis=1)
+    # 新料金の計算
+    df_usage_all['新料金'] = df_usage_all.apply(lambda x: calc_bill(x['使用量'], new_base, df_new_tiers), axis=1)
     
-    # 🌟 デモモード時の警告表示
-    if is_demo_mode:
-        st.warning("🚀 **現在デモモードで動作中**：デモデータでシミュレーションしています。ご自身のデータを分析するには、左のサイドバーから「使用量CSV」と「マスタCSV」をアップロードしてください。")
+    df_usage_all['差額'] = df_usage_all['新料金'] - df_usage_all['現行料金']
+    df_usage_all['上昇率'] = (df_usage_all['差額'] / df_usage_all['現行料金']).replace([np.inf, -np.inf], 0).fillna(0)
 
-    # === 現行マスタの確認エリア ===
-    with st.expander("📋 現行の料金表マスタを確認する（比較用）", expanded=False):
-        st.markdown("現在選択されている料金表マスタです。新しいプランを設計する際の基準としてご覧ください。")
-        master_cols = st.columns(min(len(selected_ids), 3))
-        for idx, t_id in enumerate(selected_ids):
-            with master_cols[idx % 3]:
-                st.markdown(f"**【料金表番号: {t_id}】**")
-                target_df = df_master_all[df_master_all['料金表番号'] == t_id].copy()
-                st.dataframe(
-                    target_df[['MIN', 'MAX', '基本料金', '単位料金']].style.format({
-                        "MIN": "{:,.1f}", "MAX": "{:,.1f}", "基本料金": "¥{:,.2f}", "単位料金": "¥{:,.2f}"
-                    }), hide_index=True, use_container_width=True
-                )
+    # --- サマリー表示 ---
+    cur_total = df_usage_all['現行料金'].sum()
+    new_total = df_usage_all['新料金'].sum()
+    diff_total = new_total - cur_total
+    diff_pct = (diff_total / cur_total * 100) if cur_total > 0 else 0
 
-    tab_design, tab_sim, tab_analysis = st.tabs(["Design", "Simulation", "Analysis"])
+    m1, m2, m3 = st.columns(3)
+    m1.metric("現行 総収益", f"¥{cur_total:,.0f}")
+    m2.metric("新料金 総収益", f"¥{new_total:,.0f}", f"{diff_total:,.0f}")
+    m3.metric("収益インパクト", f"{diff_pct:+.2f}%", delta_color="normal")
 
-    with tab_design:
-        st.markdown("##### 📊 料金プラン一括比較 & 設計")
+    # --- アラート分析 ---
+    st.divider()
+    st.subheader("⚠️ 個別影響（値上げアラート）分析")
+    
+    threshold = st.slider("検知しきい値（%以上の値上げ）", 0, 100, 20)
+    anomalies = df_usage_all[df_usage_all['上昇率'] >= (threshold / 100)].sort_values('上昇率', ascending=False)
+    
+    col_a, col_b = st.columns([1, 2])
+    with col_a:
+        st.metric("アラート対象件数", f"{len(anomalies)} 件", f"全 {len(df_usage_all)} 件中")
+        if not anomalies.empty:
+            csv = anomalies.to_csv(index=False).encode('utf-8-sig')
+            st.download_button("📥 アラート顧客リスト(CSV)を保存", data=csv, file_name="gasio_alerts.csv", mime="text/csv")
+    
+    with col_b:
+        if not anomalies.empty:
+            st.dataframe(anomalies[['料金番号', '使用量', '現行料金', '新料金', '上昇率']].style.format({
+                '使用量': '{:.1f}', '現行料金': '¥{:,.0f}', '新料金': '¥{:,.0f}', '上昇率': '{:.1%}'
+            }), hide_index=True)
+        else:
+            st.success("✅ 設定したしきい値を超える大幅な値上げ対象はいません。")
 
-        new_plans = {}
-        for i in range(3):
-            if not st.session_state.plan_data[i].empty:
-                curr_plan = st.session_state.plan_data[i]
-                bases = calculate_slide_rates(st.session_state.base_a[i], curr_plan)
-                res_df = pd.DataFrame([{"区画名":r['区画名'], "MIN":0.0, "MAX":r['適用上限(m3)'], "基本料金":bases.get(r['No'],0), "単位料金":r['単位料金']} for _, r in curr_plan.iterrows()])
-                new_plans[f"Plan_{i+1}"] = res_df
+    # --- グラフ表示 ---
+    st.divider()
+    g1, g2 = st.columns(2)
+    with g1:
+        # 使用量 vs 上昇率の散布図
+        fig_scatter = px.scatter(df_usage_all, x="使用量", y="上昇率", color="料金表番号", 
+                                 title="使用量ごとの上昇率分布", hover_data=["料金番号"])
+        fig_scatter.add_hline(y=threshold/100, line_dash="dash", line_color="red")
+        st.plotly_chart(fig_scatter, use_container_width=True)
+    with g2:
+        # 収益比較
+        fig_rev = go.Figure(data=[
+            go.Bar(name='現行', x=['総収益'], y=[cur_total], marker_color='#95a5a6'),
+            go.Bar(name='新料金', x=['総収益'], y=[new_total], marker_color='#e67e22')
+        ])
+        fig_rev.update_layout(title="総収益比較", barmode='group')
+        st.plotly_chart(fig_rev, use_container_width=True)
 
-        sum_cols = st.columns(3)
-        for i, (p_name, p_df) in enumerate(new_plans.items()):
-            with sum_cols[i]:
-                st.markdown(f"**{p_name}**")
-                st.dataframe(p_df.style.format({"MIN": "{:,.1f}", "MAX": "{:,.1f}", "基本料金": "¥{:,.0f}", "単位料金": "¥{:,.2f}"}), hide_index=True, use_container_width=True)
-
-        st.markdown("###### 📈 料金カーブ比較 (0〜50m3)")
-        compare_df = pd.DataFrame({"使用量": list(range(0, 51, 2))})
-        for p_name, p_df in new_plans.items():
-            compare_df[p_name] = compare_df["使用量"].apply(lambda v: calculate_bill_single(v, p_df))
-        
-        fig = px.line(compare_df, x="使用量", y=list(new_plans.keys()), height=300, color_discrete_sequence=['#3498db', '#e74c3c', '#2ecc71'])
-        fig.update_layout(yaxis_title="ガス料金(円)", legend_title="プラン", margin=dict(l=0, r=0, t=10, b=0))
-        st.plotly_chart(fig, use_container_width=True)
-
-        st.markdown("---")
-        st.markdown("##### 🛠️ プラン詳細編集")
-
-        plan_tabs = st.tabs([f"Plan {i+1}" for i in range(3)]) 
-        for i, pt in enumerate(plan_tabs):
-            with pt:
-                c1, c2 = st.columns([1, 2]) 
-                with c1:
-                    st.session_state.base_a[i] = st.number_input(f"🖋️ A区画 基本料金", value=st.session_state.base_a[i], key=f"ba_{i}", format="%.2f")
-                    bc1, bc2, _ = st.columns([1,1,2])
-                    if bc1.button("＋ 区画追加", key=f"add_{i}"):
-                        curr = st.session_state.plan_data[i]
-                        new_no = len(curr)+1
-                        st.session_state.plan_data[i] = pd.concat([curr, pd.DataFrame({'No':[new_no], '区画名':["ABCDEFGHIJKLMNOPQRSTUVWXYZ"[new_no-1] if new_no<=26 else f"T{new_no}"], '適用上限(m3)':[99999.0], '単位料金':[max(0.0, curr.iloc[-1]['単位料金']-50.0)]})], ignore_index=True)
-                        st.rerun()
-                    if bc2.button("－ 区画削除", key=f"del_{i}"):
-                        if len(st.session_state.plan_data[i]) > 1:
-                            st.session_state.plan_data[i] = st.session_state.plan_data[i].iloc[:-1].copy()
-                            st.session_state.plan_data[i].iloc[-1, 2] = 99999.0
-                            st.rerun()
-                with c2:
-                    edited = st.data_editor(st.session_state.plan_data[i], use_container_width=True, key=f"ed_plan_{i}", 
-                                           column_config={"No": st.column_config.NumberColumn(disabled=True), "区画名": st.column_config.TextColumn("🖋️ 区画名"), "適用上限(m3)": st.column_config.NumberColumn("🖋️ 適用上限", format="%.1f"), "単位料金": st.column_config.NumberColumn("🖋️ 単位料金", format="%.4f")})
-                    if not edited.equals(st.session_state.plan_data[i]):
-                        st.session_state.plan_data[i] = edited
-                        st.rerun()
-
-    with tab_sim:
-        st.markdown("##### 収支影響シミュレーション")
-        if st.button("🚀 計算実行", key="calc_run", type="primary"):
-            with st.spinner("Calculating..."):
-                res = df_target_usage.copy()
-                res['現行料金'] = res.apply(lambda r: calculate_bill_single(r['使用量'], df_master_all[df_master_all['料金表番号']==r['料金表番号']], r['調定数']), axis=1)
-                for pn, pdf in new_plans.items():
-                    res[pn] = res.apply(lambda r: calculate_bill_single(r['使用量'], pdf, r['調定数']), axis=1)
-                    res[f"{pn}_差額"] = res[pn] - res['現行料金']
-                st.session_state.simulation_result = res
-        
-        if st.session_state.simulation_result is not None:
-            sr = st.session_state.simulation_result
-            total_curr = sr['現行料金'].sum()
-            m_cols = st.columns(len(new_plans) + 1)
-            m_cols[0].metric("現行 売上", f"¥{total_curr:,.0f}")
-            summ_list = [{"プラン名": "現行", "売上総額": total_curr, "差額": 0, "増減率": 0.0}]
-            for idx, pn in enumerate(new_plans.keys()):
-                t_new = sr[pn].sum(); diff = t_new - total_curr; ratio = (diff/total_curr*100) if total_curr else 0
-                summ_list.append({"プラン名": pn, "売上総額": t_new, "差額": diff, "増減率": ratio})
-                m_cols[idx+1].metric(f"{pn}", f"¥{t_new:,.0f}", f"{ratio:+.2f}%")
-            
-            st.markdown("---")
-            gc1, gc2 = st.columns(2)
-            sel_p = gc1.selectbox("詳細分析プランを選択", list(new_plans.keys()), key="s_p_g")
-            with gc1: st.plotly_chart(px.histogram(sr, x=f"{sel_p}_差額", nbins=50, title="影響額分布", color_discrete_sequence=[COLOR_NEW]), use_container_width=True)
-            with gc2: st.plotly_chart(px.scatter(sr.sample(min(len(sr),1000)), x='使用量', y=['現行料金', sel_p], title="新旧料金プロット(1000件)", opacity=0.6), use_container_width=True)
-            st.dataframe(pd.DataFrame(summ_list).style.format({"売上総額":"¥{:,.0f}","差額":"¥{:,.0f}","増減率":"{:.2f}%"}), hide_index=True, use_container_width=True)
-
-    with tab_analysis:
-        st.markdown("##### 需要構成分析")
-        sel_p = st.selectbox("比較対象", list(new_plans.keys()), key="s_p_a")
-        fps = {tid: tuple(sorted(df_master_all[df_master_all['料金表番号']==tid]['MAX'].unique())) for tid in selected_ids}
-        for tid in fps: 
-            l = list(fps[tid]); l[-1] = 999999999.0; fps[tid] = tuple(l)
-        ids_consistent = (len(set(fps.values())) <= 1)
-        
-        g1, g2 = st.columns(2)
-        with g1:
-            st.markdown("**Current: 現行構成**")
-            if ids_consistent:
-                m_rep = df_master_all[df_master_all['料金表番号'] == selected_ids[0]].sort_values('MAX').reset_index(drop=True)
-                df_target_usage['現行区画'] = df_target_usage['使用量'].apply(lambda x: get_tier_name(x, m_rep))
-                agg_c = df_target_usage.groupby('現行区画').agg(件数=('調定数','sum'), 使用量=('使用量','sum')).reset_index()
-                st.plotly_chart(px.pie(agg_c, values='件数', names='現行区画', hole=0.5, color_discrete_sequence=CHIC_PIE_COLORS), use_container_width=True)
-                st.dataframe(agg_c.style.format({"使用量":"{:,.1f}"}), hide_index=True, use_container_width=True)
-            else:
-                st.info("⚠️ 異なる区画の料金表が混在しているため、分布図を表示")
-                st.plotly_chart(px.histogram(df_target_usage, x="使用量", color="料金表番号", nbins=50, color_discrete_sequence=CHIC_PIE_COLORS), use_container_width=True)
-        with g2:
-            st.markdown(f"**Proposal: {sel_p}構成**")
-            df_target_usage['新区画'] = df_target_usage['使用量'].apply(lambda x: get_tier_name(x, new_plans[sel_p]))
-            agg_n = df_target_usage.groupby('新区画').agg(件数=('調定数','sum'), 使用量=('使用量','sum')).reset_index()
-            st.plotly_chart(px.pie(agg_n, values='件数', names='新区画', hole=0.5, color_discrete_sequence=CHIC_PIE_COLORS), use_container_width=True)
-            st.dataframe(agg_n.style.format({"件数":"{:,.0f}", "使用量":"{:,.1f}"}), hide_index=True, use_container_width=True)
-
-    # ---------------------------------------------------------
-    # 5. エクスポート機能（サイドバーに総合レポート出力）
-    # ---------------------------------------------------------
-    if st.session_state.simulation_result is not None:
-        with st.sidebar:
-            st.markdown("---")
-            st.markdown("##### 📥 エクスポート")
-            
-            excel_buf = io.BytesIO()
-            with pd.ExcelWriter(excel_buf) as writer:
-                # 1_Summary（収支サマリー）
-                pd.DataFrame(summ_list).to_excel(writer, index=False, sheet_name='1_Summary')
-                
-                # 2_Plan_Design（新プランの設計内容）
-                plan_design_all = []
-                for p_name, p_df in new_plans.items():
-                    temp_df = p_df.copy()
-                    temp_df.insert(0, 'プラン名', p_name)
-                    plan_design_all.append(temp_df)
-                if plan_design_all:
-                    pd.concat(plan_design_all).to_excel(writer, index=False, sheet_name='2_Plan_Design')
-                
-                # 3_Current_Master（比較元の現行マスタ）
-                df_master_all[df_master_all['料金表番号'].isin(selected_ids)].to_excel(writer, index=False, sheet_name='3_Current_Master')
-                
-                # 4_Simulation_Result（全顧客の明細）
-                st.session_state.simulation_result.to_excel(writer, index=False, sheet_name='4_Simulation_Result')
-            
-            st.download_button(
-                label="📊 総合レポート(Excel)をDL",
-                data=excel_buf.getvalue(),
-                file_name=f"gasio_comprehensive_report_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                type="primary",
-                use_container_width=True
-            )
+else:
+    st.warning("👈 サイドバーからファイルをアップロードするか、『デモモード』をオンにしてください。")
+    #
