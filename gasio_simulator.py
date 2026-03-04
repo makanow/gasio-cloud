@@ -55,30 +55,40 @@ COLOR_BAR, COLOR_CURRENT, COLOR_NEW = '#34495e', '#95a5a6', '#e67e22'
 # ---------------------------------------------------------
 # 2. 関数定義
 # ---------------------------------------------------------
-# 【指示2】ガイダンス用サンプルCSV出力関数
+# 【改良】3種類の料金表を含むリアルなサンプルデータ生成
 def get_sample_usage_csv():
-    df = pd.DataFrame({'料金表番号': [99, 99, 99], '使用量': [12.5, 25.0, 5.0]})
+    df = pd.DataFrame({
+        '料金表番号': [
+            10, 10, 10, 10, 10,  # 一般想定
+            20, 20, 20, 20, 20,  # 暖房想定
+            30, 30, 30, 30, 30   # 大口想定
+        ],
+        '使用量': [
+            5.2, 12.5, 28.0, 45.3, 3.0,
+            18.5, 35.2, 60.1, 14.0, 42.8,
+            55.0, 120.5, 80.2, 45.0, 210.0
+        ]
+    })
     return df.to_csv(index=False).encode('utf-8-sig')
 
 def get_sample_master_csv():
     df = pd.DataFrame({
-        '料金表番号': [99, 99, 99],
-        '区画名': ['A', 'B', 'C'],
-        'MIN': [0, 8.0, 30.0],
-        'MAX': [8.0, 30.0, 99999.0],
-        '基本料金': [1800, 2600, 5600],
-        '単位料金': [550, 450, 350]
+        '料金表番号': [10, 10, 10, 20, 20, 20, 30, 30],
+        '区画名': ['A', 'B', 'C', 'A', 'B', 'C', 'A', 'B'],
+        'MIN': [0, 8.0, 30.0, 0, 15.0, 50.0, 0, 50.0],
+        'MAX': [8.0, 30.0, 99999.0, 15.0, 50.0, 99999.0, 50.0, 99999.0],
+        '基本料金': [1800, 2600, 5600, 2000, 3000, 6000, 5000, 10000],
+        '単位料金': [550, 450, 350, 500, 400, 300, 350, 250]
     })
     return df.to_csv(index=False).encode('utf-8-sig')
 
 def normalize_columns(df):
-    # 【指示1】「調定」の置換を削除
     rename_map = {'基本':'基本料金','基礎料金':'基本料金','Base':'基本料金','上限':'MAX','適用上限':'MAX','ID':'料金表番号','Usage':'使用量'}
     df = df.rename(columns=rename_map)
     for c in ['使用量']: 
         if c in df.columns: df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0)
     
-    # --- カンマや通貨記号の除去処理 ---
+    # カンマや通貨記号の除去処理
     for col in ['MIN', 'MAX', '基本料金', '単位料金']:
         if col in df.columns:
             if df[col].dtype == 'object':
@@ -91,7 +101,7 @@ def normalize_columns(df):
                 
     if '料金表番号' not in df.columns: df['料金表番号'] = 10
     
-    # 【指示1】調定数と取り付け数を完全に削除
+    # 調定数と取り付け数を完全に削除
     drop_cols = ['調定数', '取り付け数']
     df = df.drop(columns=[c for c in drop_cols if c in df.columns])
     
@@ -144,7 +154,6 @@ def calculate_slide_rates(base_a, blocks_df):
         base_fees[c['No']] = base_fees[p['No']] + (p['単位料金'] - c['単位料金']) * p['適用上限(m3)']
     return base_fees
 
-# 【指示1】billing_countパラメータを削除
 def calculate_bill_single(usage, tariff_df):
     if tariff_df.empty: return 0
     df = tariff_df.copy()
@@ -170,9 +179,6 @@ def get_tier_name(usage, tariff_df):
 with st.sidebar:
     st.header("📂 Data Import")
     
-    # 【指示3】設定復元ボタン（JSON読み込み）を削除
-    
-    # 【指示2】CSVインポートガイダンス追加
     with st.expander("ℹ️ CSVインポートガイダンス", expanded=False):
         st.markdown("""
         **【1. 使用量CSV】**
@@ -210,18 +216,26 @@ with st.sidebar:
 
     if is_demo_mode:
         st.info("💡 CSV未設定のため、デモデータ読込中")
+        # 【改良】3種類の料金表を含むデモ用マスタ
         df_master_all = pd.DataFrame({
-            'MIN': [0.0, 8.0, 30.0], 'MAX': [8.0, 30.0, 999999999.0],
-            '基本料金': [1800.0, 2600.0, 5600.0], '単位料金': [550.0, 450.0, 350.0],
-            '料金表番号': [99, 99, 99], '区画': ['A', 'B', 'C']
+            '料金表番号': [10, 10, 10, 20, 20, 20, 30, 30],
+            '区画名': ['A', 'B', 'C', 'A', 'B', 'C', 'A', 'B'],
+            'MIN': [0.0, 8.0, 30.0, 0.0, 15.0, 50.0, 0.0, 50.0],
+            'MAX': [8.0, 30.0, 99999.0, 15.0, 50.0, 99999.0, 50.0, 99999.0],
+            '基本料金': [1800.0, 2600.0, 5600.0, 2000.0, 3000.0, 6000.0, 5000.0, 10000.0],
+            '単位料金': [550.0, 450.0, 350.0, 500.0, 400.0, 300.0, 350.0, 250.0]
         })
+        # 【改良】それぞれの料金表特性に合わせた使用量のばらつきをシミュレート
         np.random.seed(42)
-        demo_usages = np.round(np.random.gamma(shape=2.5, scale=6.0, size=800), 1)
-        # 【指示1】デモデータからも調定数を削除
-        df_usage = pd.DataFrame({'使用量': demo_usages, '料金表番号': 99})
-        selected_ids = [99]
-
-    # 【指示3】設定保存ボタン（JSON出力）を削除
+        u10 = np.round(np.random.gamma(shape=2.5, scale=6.0, size=500), 1)
+        u20 = np.round(np.random.gamma(shape=3.0, scale=10.0, size=200), 1)
+        u30 = np.round(np.random.gamma(shape=5.0, scale=15.0, size=50), 1)
+        
+        df_usage = pd.DataFrame({
+            '料金表番号': [10]*500 + [20]*200 + [30]*50,
+            '使用量': np.concatenate([u10, u20, u30])
+        })
+        selected_ids = [10, 20, 30]
 
 # ---------------------------------------------------------
 # 4. メインエリア
@@ -303,7 +317,6 @@ if df_usage is not None and df_master_all is not None and selected_ids:
         if st.button("🚀 計算実行", key="calc_run", type="primary"):
             with st.spinner("Calculating..."):
                 res = df_target_usage.copy()
-                # 【指示1】調定数の渡しを削除
                 res['現行料金'] = res.apply(lambda r: calculate_bill_single(r['使用量'], df_master_all[df_master_all['料金表番号']==r['料金表番号']]), axis=1)
                 for pn, pdf in new_plans.items():
                     res[pn] = res.apply(lambda r: calculate_bill_single(r['使用量'], pdf), axis=1)
@@ -321,7 +334,6 @@ if df_usage is not None and df_master_all is not None and selected_ids:
                 summ_list.append({"プラン名": pn, "売上総額": t_new, "差額": diff, "増減率": ratio})
                 m_cols[idx+1].metric(f"{pn}", f"¥{t_new:,.0f}", f"{ratio:+.2f}%")
             
-            # 【指示4】シミュレーション結果のCSV出力ボタンを追加
             st.markdown("---")
             csv_result = sr.to_csv(index=False).encode('utf-8-sig')
             st.download_button(
@@ -352,7 +364,6 @@ if df_usage is not None and df_master_all is not None and selected_ids:
             if ids_consistent:
                 m_rep = df_master_all[df_master_all['料金表番号'] == selected_ids[0]].sort_values('MAX').reset_index(drop=True)
                 df_target_usage['現行区画'] = df_target_usage['使用量'].apply(lambda x: get_tier_name(x, m_rep))
-                # 【指示1】調定数のsumを外し、使用量のcountに変更して件数を算出
                 agg_c = df_target_usage.groupby('現行区画').agg(件数=('使用量','count'), 使用量=('使用量','sum')).reset_index()
                 st.plotly_chart(px.pie(agg_c, values='件数', names='現行区画', hole=0.5, color_discrete_sequence=CHIC_PIE_COLORS), use_container_width=True)
                 st.dataframe(agg_c.style.format({"使用量":"{:,.1f}"}), hide_index=True, use_container_width=True)
@@ -362,7 +373,6 @@ if df_usage is not None and df_master_all is not None and selected_ids:
         with g2:
             st.markdown(f"**Proposal: {sel_p}構成**")
             df_target_usage['新区画'] = df_target_usage['使用量'].apply(lambda x: get_tier_name(x, new_plans[sel_p]))
-            # 【指示1】調定数のsumを外し、使用量のcountに変更して件数を算出
             agg_n = df_target_usage.groupby('新区画').agg(件数=('使用量','count'), 使用量=('使用量','sum')).reset_index()
             st.plotly_chart(px.pie(agg_n, values='件数', names='新区画', hole=0.5, color_discrete_sequence=CHIC_PIE_COLORS), use_container_width=True)
             st.dataframe(agg_n.style.format({"件数":"{:,.0f}", "使用量":"{:,.1f}"}), hide_index=True, use_container_width=True)
