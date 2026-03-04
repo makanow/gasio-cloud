@@ -141,7 +141,7 @@ if file_master and file_usage:
         is_demo_mode = False
 
 if is_demo_mode:
-    st.info("💡 CSV未設定のため、デモデータ読込中")
+
     # 3種類の料金表マスタ
     df_master = pd.DataFrame({
         '料金表番号': [10, 10, 10, 20, 20, 20, 30, 30],
