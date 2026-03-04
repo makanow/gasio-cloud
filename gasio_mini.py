@@ -2,10 +2,10 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import numpy as np
-import io
+import datetime
 
 # ---------------------------------------------------------
-# 1. 設定 & デザイン (ロゴカラー修復済)
+# 1. 設定 & デザイン
 # ---------------------------------------------------------
 st.set_page_config(page_title="Gasio mini", page_icon="🔥", layout="wide")
 
@@ -26,25 +26,42 @@ st.markdown('<div class="sub-title">Current Status Visualizer (Stable Aggregatio
 # ---------------------------------------------------------
 # 2. 関数定義
 # ---------------------------------------------------------
+# 【指示2】3種類の料金表を含むリアルなサンプルデータ生成
+def get_sample_usage_csv():
+    df = pd.DataFrame({
+        '料金表番号': [10]*5 + [20]*5 + [30]*5,
+        '使用量': [
+            5.2, 12.5, 28.0, 45.3, 3.0,
+            18.5, 35.2, 60.1, 14.0, 42.8,
+            55.0, 120.5, 80.2, 45.0, 210.0
+        ]
+    })
+    return df.to_csv(index=False).encode('utf-8-sig')
+
+def get_sample_master_csv():
+    df = pd.DataFrame({
+        '料金表番号': [10, 10, 10, 20, 20, 20, 30, 30],
+        '区画名': ['A', 'B', 'C', 'A', 'B', 'C', 'A', 'B'],
+        'MIN': [0, 8.0, 30.0, 0, 15.0, 50.0, 0, 50.0],
+        'MAX': [8.0, 30.0, 99999.0, 15.0, 50.0, 99999.0, 50.0, 99999.0],
+        '基本料金': [1800, 2600, 5600, 2000, 3000, 6000, 5000, 10000],
+        '単位料金': [550, 450, 350, 500, 400, 300, 350, 250]
+    })
+    return df.to_csv(index=False).encode('utf-8-sig')
+
 def normalize_columns(df):
     rename_map = {
         '基本': '基本料金', '基礎料金': '基本料金', 'Base': '基本料金',
         '単位': '単位料金', '単価': '単位料金', '従量料金': '単位料金',
         '上限': 'MAX', '適用上限': 'MAX', 'max': 'MAX',
         'ID': '料金表番号', 'Code': '料金表番号',
-        'Usage': '使用量', 'usage': '使用量', 'Vol': '使用量',
-        '調定': '調定数', 'BillingCount': '調定数', '取付': '取付数'
+        'Usage': '使用量', 'usage': '使用量', 'Vol': '使用量'
     }
     df = df.rename(columns=rename_map)
-    # 読み込み時の数値化
     if '料金表番号' in df.columns:
         df['料金表番号'] = pd.to_numeric(df['料金表番号'], errors='coerce').fillna(0).astype(int)
     if '使用量' in df.columns:
         df['使用量'] = pd.to_numeric(df['使用量'], errors='coerce').fillna(0.0)
-    if '調定数' in df.columns:
-        df['調定数'] = pd.to_numeric(df['調定数'], errors='coerce').fillna(0.0)
-    else:
-        df['調定数'] = 1.0
         
     # --- カンマや通貨記号の除去処理 ---
     for col in ['MIN', 'MAX', '基本料金', '単位料金']:
@@ -55,6 +72,10 @@ def normalize_columns(df):
                 df[col] = pd.to_numeric(df[col], errors='coerce').fillna(999999999.0)
             else:
                 df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
+                
+    # 【指示1】調定数と取り付け数を完全に削除
+    drop_cols = ['調定', '調定数', 'BillingCount', '取付', '取付数']
+    df = df.drop(columns=[c for c in drop_cols if c in df.columns])
                 
     return df
 
@@ -82,10 +103,28 @@ def get_tier_name(usage, tariff_df):
     return letters[rank-1] if rank <= len(letters) else f"Tier{rank}"
 
 # ---------------------------------------------------------
-# 3. メイン処理 (デモデータ自動生成ロジック追加)
+# 3. サイドバー: インポートガイダンス
 # ---------------------------------------------------------
 with st.sidebar:
     st.header("📂 Data Import")
+    
+    # 【指示2】CSVインポートガイダンスの追加
+    with st.expander("ℹ️ CSVインポートガイダンス", expanded=False):
+        st.markdown("""
+        **【1. 使用量CSV】**
+        - `料金表番号`: マスタと照合するキー
+        - `使用量`: 月間のガス使用量
+        ※調定数・取り付け数は自動で除外されます。
+        
+        **【2. 料金表マスタCSV】**
+        - `料金表番号`
+        - `MIN`, `MAX`: 各区画の適用範囲
+        - `基本料金`, `単位料金`: 各区画の料金設定
+        """)
+        st.download_button("📥 使用量サンプルCSV", get_sample_usage_csv(), "sample_usage.csv", "text/csv")
+        st.download_button("📥 マスタサンプルCSV", get_sample_master_csv(), "sample_master.csv", "text/csv")
+        
+    st.markdown("---")
     file_usage = st.file_uploader("1. 使用量CSV (実績)", type=['csv'])
     file_master = st.file_uploader("2. 料金表マスタCSV (定義)", type=['csv'])
 
@@ -104,29 +143,42 @@ if file_master and file_usage:
 
 if is_demo_mode:
     st.info("💡 CSV未設定のため、デモデータ読込中")
-    # デモ用マスタ
+    # 3種類の料金表マスタ
     df_master = pd.DataFrame({
-        'MIN': [0.0, 8.0, 30.0], 'MAX': [8.0, 30.0, 999999999.0],
-        '基本料金': [1800.0, 2600.0, 5600.0], '単位料金': [550.0, 450.0, 350.0],
-        '料金表番号': [99, 99, 99], '区画': ['A', 'B', 'C']
+        '料金表番号': [10, 10, 10, 20, 20, 20, 30, 30],
+        '区画名': ['A', 'B', 'C', 'A', 'B', 'C', 'A', 'B'],
+        'MIN': [0.0, 8.0, 30.0, 0.0, 15.0, 50.0, 0.0, 50.0],
+        'MAX': [8.0, 30.0, 99999.0, 15.0, 50.0, 99999.0, 50.0, 99999.0],
+        '基本料金': [1800.0, 2600.0, 5600.0, 2000.0, 3000.0, 6000.0, 5000.0, 10000.0],
+        '単位料金': [550.0, 450.0, 350.0, 500.0, 400.0, 300.0, 350.0, 250.0]
     })
-    # デモ用使用量（ガンマ分布を使って、リアルなガス使用量の偏りを再現）
+    # 使用量のシミュレート
     np.random.seed(42)
-    demo_usages = np.round(np.random.gamma(shape=2.5, scale=6.0, size=800), 1)
-    df_usage = pd.DataFrame({'使用量': demo_usages, '調定数': 1, '料金表番号': 99})
+    u10 = np.round(np.random.gamma(shape=2.5, scale=6.0, size=500), 1)
+    u20 = np.round(np.random.gamma(shape=3.0, scale=10.0, size=200), 1)
+    u30 = np.round(np.random.gamma(shape=5.0, scale=15.0, size=50), 1)
+    
+    df_usage = pd.DataFrame({
+        '料金表番号': [10]*500 + [20]*200 + [30]*50,
+        '使用量': np.concatenate([u10, u20, u30])
+    })
 
+# ---------------------------------------------------------
+# 4. メイン処理
+# ---------------------------------------------------------
 if df_usage is not None and df_master is not None:
-    # 🌟 デモモード時の警告表示
     if is_demo_mode:
-        st.warning("🚀 **現在デモモードで動作中**：デモデータで集計しています。ご自身のデータを分析するには、左のサイドバーから「使用量CSV」と「マスタCSV」をアップロードしてください。")
+        st.warning("🚀 **現在デモモードで動作中**：ご自身のデータを分析するには、左のサイドバーから「使用量CSV」と「マスタCSV」をアップロードしてください。")
 
     usage_ids = sorted(df_usage['料金表番号'].unique())
+    
+    # ⚠️ miniは区画不一致を許容しないため、デフォルトは先頭の1つ（例: 10）のみ選択状態にする
     selected_ids = st.sidebar.multiselect("料金表番号を選択", usage_ids, default=usage_ids[:1])
 
     if not selected_ids:
         st.stop()
 
-    # 指紋チェック
+    # 指紋チェック（区画の構造が一致しているか）
     fps_check = {}
     for tid in selected_ids:
         m_sub = df_master[df_master['料金表番号'] == tid]
@@ -136,10 +188,10 @@ if df_usage is not None and df_master is not None:
             fps_check[tid] = tuple(f)
     
     if len(set(fps_check.values())) > 1:
-        st.error("⚠️ 料金表の区画が一致しません。")
+        st.error("⚠️ 選択された料金表の区画（MAX）が一致しません。需要構成を集計するには、同じ区画割の料金表のみを選択してください。")
         st.stop()
 
-    # === 🌟 現行マスタの確認エリア ===
+    # === 現行マスタの確認エリア ===
     with st.expander("📋 現行の料金表マスタを確認する", expanded=False):
         st.markdown("現在選択されている料金表マスタです。")
         master_cols = st.columns(min(len(selected_ids), 3))
@@ -152,20 +204,20 @@ if df_usage is not None and df_master is not None:
                         "MIN": "{:,.1f}", "MAX": "{:,.1f}", "基本料金": "¥{:,.2f}", "単位料金": "¥{:,.2f}"
                     }), hide_index=True, use_container_width=True
                 )
-    # ==========================================
 
-    # 集計
+    # 集計ロジック
     df_target = df_usage[df_usage['料金表番号'].isin(selected_ids)].copy()
     master_rep = df_master[df_master['料金表番号'] == selected_ids[0]].sort_values('MAX').reset_index(drop=True)
     
     df_target['Current_Tier'] = df_target['使用量'].apply(lambda x: get_tier_name(x, master_rep))
     
-    agg_df = df_target.groupby('Current_Tier', as_index=False).agg({
-        '調定数': 'sum',
-        '使用量': 'sum'
-    }).rename(columns={'使用量': '総使用量'})
+    # 【指示1】調定数(sum)ではなく、使用量のカウント(count)で件数を取得
+    agg_df = df_target.groupby('Current_Tier', as_index=False).agg(
+        件数=('使用量', 'count'),
+        総使用量=('使用量', 'sum')
+    )
     
-    agg_df['調定数'] = agg_df['調定数'].astype(float)
+    agg_df['件数'] = agg_df['件数'].astype(int)
     agg_df['総使用量'] = agg_df['総使用量'].astype(float)
 
     # 並び順固定
@@ -175,11 +227,11 @@ if df_usage is not None and df_master is not None:
 
     # --- 表示 ---
     st.markdown("---")
-    total_count = agg_df['調定数'].sum()
+    total_count = agg_df['件数'].sum()
     total_vol = agg_df['総使用量'].sum()
     
     c1, c2, c3 = st.columns(3)
-    c1.metric("合計調定数", f"{total_count:,.0f}")
+    c1.metric("合計件数", f"{total_count:,.0f} 件")
     c2.metric("合計使用量", f"{total_vol:,.0f} m³")
     if total_count > 0:
         c3.metric("1件あたり平均", f"{total_vol/total_count:.1f} m³")
@@ -189,28 +241,27 @@ if df_usage is not None and df_master is not None:
         chic_colors = ['#88a0b9', '#aab7b8', '#82e0aa', '#f5b7b1', '#d7bde2', '#f9e79f']
         
         with g1:
-            fig1 = px.pie(agg_df, values='調定数', names='Current_Tier', hole=0.5, 
-                          color_discrete_sequence=chic_colors, title="調定数シェア")
+            # 【変更】調定数 -> 件数
+            fig1 = px.pie(agg_df, values='件数', names='Current_Tier', hole=0.5, 
+                          color_discrete_sequence=chic_colors, title="件数シェア")
             st.plotly_chart(fig1, use_container_width=True)
         with g2:
             fig2 = px.pie(agg_df, values='総使用量', names='Current_Tier', hole=0.5, 
                           color_discrete_sequence=chic_colors, title="使用量シェア")
             st.plotly_chart(fig2, use_container_width=True)
 
-        agg_df['構成比(調定)'] = (agg_df['調定数'] / total_count * 100).map('{:.1f}%'.format)
+        agg_df['構成比(件数)'] = (agg_df['件数'] / total_count * 100).map('{:.1f}%'.format)
         agg_df['構成比(使用量)'] = (agg_df['総使用量'] / (total_vol if total_vol > 0 else 1) * 100).map('{:.1f}%'.format)
         
-        output_df = agg_df[['Current_Tier', '調定数', '構成比(調定)', '総使用量', '構成比(使用量)']]
-        st.dataframe(output_df, hide_index=True, use_container_width=True)
-
-        # 🌟 Excel出力機能の追加
-        buffer = io.BytesIO()
-        with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
-            output_df.to_excel(writer, index=False, sheet_name='需要構成率')
+        # テーブル表示
+        st.dataframe(agg_df[['Current_Tier', '件数', '構成比(件数)', '総使用量', '構成比(使用量)']], hide_index=True, use_container_width=True)
         
+        # 【指示4】シミュレーション結果(集計結果)をCSV出力できるようにする
+        st.markdown("---")
+        csv_data = agg_df.to_csv(index=False).encode('utf-8-sig')
         st.download_button(
-            label="📥 Excelでダウンロード",
-            data=buffer.getvalue(),
-            file_name="demand_composition.xlsx",
-            mime="application/vnd.ms-excel"
+            label="💾 集計結果をCSV出力",
+            data=csv_data,
+            file_name=f"gasio_mini_result_{datetime.datetime.now().strftime('%Y%m%d')}.csv",
+            mime="text/csv"
         )
