@@ -204,24 +204,47 @@ if df_usage is not None and df_master is not None:
                     }), hide_index=True, use_container_width=True
                 )
 
-    # 集計ロジック
+# 集計ロジック (全件・複数マスタ対応版)
     df_target = df_usage[df_usage['料金表番号'].isin(selected_ids)].copy()
-    master_rep = df_master[df_master['料金表番号'] == selected_ids[0]].sort_values('MAX').reset_index(drop=True)
     
-    df_target['Current_Tier'] = df_target['使用量'].apply(lambda x: get_tier_name(x, master_rep))
-    
-    # 【指示1】調定数(sum)ではなく、使用量のカウント(count)で件数を取得
-    agg_df = df_target.groupby('Current_Tier', as_index=False).agg(
-        件数=('使用量', 'count'),
-        総使用量=('使用量', 'sum')
-    )
+    results = []
+    for _, row in df_target.iterrows():
+        tid = row['料金表番号']
+        vol = row['使用量']
+        
+        # そのデータが持つ「料金表番号」専用のマスタを引っ張る
+        m = df_master[df_master['料金表番号'] == tid]
+        
+        current_tier = "不明"
+        if not m.empty:
+            for _, row_m in m.iterrows():
+                # そのマスタのMIN〜MAXの間に収まっているか判定
+                if row_m['MIN'] <= vol <= row_m['MAX']:
+                    current_tier = row_m['区画名']
+                    break
+        
+        results.append({
+            'Current_Tier': current_tier,
+            '使用量': vol
+        })
+
+    full_results_df = pd.DataFrame(results)
+
+    # 【指示1】使用量のカウント(count)で件数を取得
+    if not full_results_df.empty:
+        agg_df = full_results_df.groupby('Current_Tier', as_index=False).agg(
+            件数=('使用量', 'count'),
+            総使用量=('使用量', 'sum')
+        )
+    else:
+        agg_df = pd.DataFrame(columns=['Current_Tier', '件数', '総使用量'])
     
     agg_df['件数'] = agg_df['件数'].astype(int)
     agg_df['総使用量'] = agg_df['総使用量'].astype(float)
 
-    # 並び順固定
-    order_list = [get_tier_name(r['MAX']-1e-6, master_rep) for _, r in master_rep.iterrows()]
-    agg_df['order'] = agg_df['Current_Tier'].apply(lambda x: order_list.index(x) if x in order_list else 99)
+    # 並び順固定 (A, B, C... 不明 の順)
+    tier_order = {'A': 0, 'B': 1, 'C': 2, 'D': 3, 'E': 4, '不明': 99}
+    agg_df['order'] = agg_df['Current_Tier'].map(lambda x: tier_order.get(x, 99))
     agg_df = agg_df.sort_values('order').drop(columns=['order'])
 
     # --- 表示 ---
