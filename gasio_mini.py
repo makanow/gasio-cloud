@@ -26,7 +26,6 @@ st.markdown('<div class="sub-title">Current Status Visualizer (Stable Aggregatio
 # ---------------------------------------------------------
 # 2. 関数定義
 # ---------------------------------------------------------
-# 【指示2】3種類の料金表を含むリアルなサンプルデータ生成
 def get_sample_usage_csv():
     df = pd.DataFrame({
         '料金表番号': [10]*5 + [20]*5 + [30]*5,
@@ -63,7 +62,6 @@ def normalize_columns(df):
     if '使用量' in df.columns:
         df['使用量'] = pd.to_numeric(df['使用量'], errors='coerce').fillna(0.0)
         
-    # --- カンマや通貨記号の除去処理 ---
     for col in ['MIN', 'MAX', '基本料金', '単位料金']:
         if col in df.columns:
             if df[col].dtype == 'object':
@@ -73,7 +71,6 @@ def normalize_columns(df):
             else:
                 df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
                 
-    # 【指示1】調定数と取り付け数を完全に削除
     drop_cols = ['調定', '調定数', 'BillingCount', '取付', '取付数']
     df = df.drop(columns=[c for c in drop_cols if c in df.columns])
                 
@@ -90,15 +87,34 @@ def smart_load(file):
     return None
 
 def get_tier_name(usage, tariff_df):
+    """
+    ガス料金の区画判定ロジック:
+    - 最初の区画: 0 <= 使用量 <= MAX
+    - 2つ目以降の区画: MIN < 使用量 <= MAX
+    """
     if tariff_df.empty: return "Unknown"
+    
+    # 安全のためMAXで昇順ソート
     sorted_df = tariff_df.sort_values('MAX').reset_index(drop=True)
-    applicable = sorted_df[sorted_df['MAX'] >= (usage - 1e-9)]
-    row = applicable.iloc[0] if not applicable.empty else sorted_df.iloc[-1]
+    target_row = sorted_df.iloc[-1] # デフォルトは最後の区画
     
+    for idx, row in sorted_df.iterrows():
+        if idx == 0:
+            if usage <= row['MAX']:
+                target_row = row
+                break
+        else:
+            # 厳密な不等号で境界線を判定
+            if row['MIN'] < usage <= row['MAX']:
+                target_row = row
+                break
+
+    # 区画名の抽出
     for col in ['区画名', '区画']:
-        if col in row and pd.notna(row[col]): return str(row[col])
+        if col in target_row and pd.notna(target_row[col]): 
+            return str(target_row[col])
     
-    rank = row.name + 1
+    rank = target_row.name + 1
     letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
     return letters[rank-1] if rank <= len(letters) else f"Tier{rank}"
 
@@ -108,7 +124,6 @@ def get_tier_name(usage, tariff_df):
 with st.sidebar:
     st.header("📂 Data Import")
     
-    # 【指示2】CSVインポートガイダンスの追加
     with st.expander("ℹ️ CSVインポートガイダンス", expanded=False):
         st.markdown("""
         **【1. 使用量CSV】**
@@ -141,7 +156,6 @@ if file_master and file_usage:
         is_demo_mode = False
 
 if is_demo_mode:
-
     # 3種類の料金表マスタ
     df_master = pd.DataFrame({
         '料金表番号': [10, 10, 10, 20, 20, 20, 30, 30],
@@ -151,14 +165,17 @@ if is_demo_mode:
         '基本料金': [1800.0, 2600.0, 5600.0, 2000.0, 3000.0, 6000.0, 5000.0, 10000.0],
         '単位料金': [550.0, 450.0, 350.0, 500.0, 400.0, 300.0, 350.0, 250.0]
     })
-    # 使用量のシミュレート
+    # 使用量のシミュレート（デモ用なのでランダムシード固定）
     np.random.seed(42)
     u10 = np.round(np.random.gamma(shape=2.5, scale=6.0, size=500), 1)
     u20 = np.round(np.random.gamma(shape=3.0, scale=10.0, size=200), 1)
     u30 = np.round(np.random.gamma(shape=5.0, scale=15.0, size=50), 1)
     
+    # テスト用境界値データの混入
+    u10 = np.append(u10, [8.0, 8.1, 15.0])
+    
     df_usage = pd.DataFrame({
-        '料金表番号': [10]*500 + [20]*200 + [30]*50,
+        '料金表番号': [10]*503 + [20]*200 + [30]*50,
         '使用量': np.concatenate([u10, u20, u30])
     })
 
@@ -177,6 +194,19 @@ if df_usage is not None and df_master is not None:
     if not selected_ids:
         st.stop()
 
+    # 指紋チェック（区画の構造が一致しているか）
+    fps_check = {}
+    for tid in selected_ids:
+        m_sub = df_master[df_master['料金表番号'] == tid]
+        if not m_sub.empty:
+            f = sorted(m_sub['MAX'].unique())
+            if f: f[-1] = 999999999.0
+            fps_check[tid] = tuple(f)
+    
+    if len(set(fps_check.values())) > 1:
+        st.error("⚠️ 選択された料金表の区画（MAX）が一致しません。需要構成を集計するには、同じ区画割の料金表のみを選択してください。")
+        st.stop()
+
     # === 現行マスタの確認エリア ===
     with st.expander("📋 現行の料金表マスタを確認する", expanded=False):
         st.markdown("現在選択されている料金表マスタです。")
@@ -191,22 +221,13 @@ if df_usage is not None and df_master is not None:
                     }), hide_index=True, use_container_width=True
                 )
 
-# 集計ロジック (全件・複数マスタ対応版)
+    # 集計ロジック
     df_target = df_usage[df_usage['料金表番号'].isin(selected_ids)].copy()
-
-    # 顧客1件ごとに、自身の「料金表番号」に該当するマスタを引いて区画名を判定する関数
-    def apply_correct_tier(row):
-        tid = row['料金表番号']
-        usage = row['使用量']
-        # その顧客の料金表番号専用のマスタを抽出
-        t_master = df_master[df_master['料金表番号'] == tid]
-        # 元々ある完璧な関数 get_tier_name に渡す
-        return get_tier_name(usage, t_master)
-
-    # iterrowsループの代わりにapplyを使って全行に一括適用（圧倒的に高速だ）
-    df_target['Current_Tier'] = df_target.apply(apply_correct_tier, axis=1)
-
-    # 使用量のカウント(count)で件数を取得し、総使用量を合算
+    master_rep = df_master[df_master['料金表番号'] == selected_ids[0]].sort_values('MAX').reset_index(drop=True)
+    
+    # 該当区画を特定し、その1区画に対して使用量の100%を割り当てる
+    df_target['Current_Tier'] = df_target['使用量'].apply(lambda x: get_tier_name(x, master_rep))
+    
     agg_df = df_target.groupby('Current_Tier', as_index=False).agg(
         件数=('使用量', 'count'),
         総使用量=('使用量', 'sum')
@@ -215,10 +236,23 @@ if df_usage is not None and df_master is not None:
     agg_df['件数'] = agg_df['件数'].astype(int)
     agg_df['総使用量'] = agg_df['総使用量'].astype(float)
 
-    # 並び順固定（master_repがなくなったため、A, B, C...のアルファベット順を明示的に指定）
-    tier_order = {'A': 0, 'B': 1, 'C': 2, 'D': 3, 'E': 4, 'F': 5, 'Unknown': 99}
-    agg_df['order'] = agg_df['Current_Tier'].map(lambda x: tier_order.get(x, 99))
+    # 並び順固定ロジックの改善（マスタから直接区画名リストを生成）
+    order_list = []
+    for idx, row in master_rep.iterrows():
+        name = None
+        for col in ['区画名', '区画']:
+            if col in row and pd.notna(row[col]):
+                name = str(row[col])
+                break
+        if not name:
+            rank = idx + 1
+            letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+            name = letters[rank-1] if rank <= len(letters) else f"Tier{rank}"
+        order_list.append(name)
+
+    agg_df['order'] = agg_df['Current_Tier'].apply(lambda x: order_list.index(x) if x in order_list else 99)
     agg_df = agg_df.sort_values('order').drop(columns=['order'])
+
     # --- 表示 ---
     st.markdown("---")
     total_count = agg_df['件数'].sum()
@@ -235,7 +269,6 @@ if df_usage is not None and df_master is not None:
         chic_colors = ['#88a0b9', '#aab7b8', '#82e0aa', '#f5b7b1', '#d7bde2', '#f9e79f']
         
         with g1:
-            # 【変更】調定数 -> 件数
             fig1 = px.pie(agg_df, values='件数', names='Current_Tier', hole=0.5, 
                           color_discrete_sequence=chic_colors, title="件数シェア")
             st.plotly_chart(fig1, use_container_width=True)
@@ -250,7 +283,6 @@ if df_usage is not None and df_master is not None:
         # テーブル表示
         st.dataframe(agg_df[['Current_Tier', '件数', '構成比(件数)', '総使用量', '構成比(使用量)']], hide_index=True, use_container_width=True)
         
-        # 【指示4】シミュレーション結果(集計結果)をCSV出力できるようにする
         st.markdown("---")
         csv_data = agg_df.to_csv(index=False).encode('utf-8-sig')
         st.download_button(
