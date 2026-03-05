@@ -177,19 +177,6 @@ if df_usage is not None and df_master is not None:
     if not selected_ids:
         st.stop()
 
-    # 指紋チェック（区画の構造が一致しているか）
-    fps_check = {}
-    for tid in selected_ids:
-        m_sub = df_master[df_master['料金表番号'] == tid]
-        if not m_sub.empty:
-            f = sorted(m_sub['MAX'].unique())
-            if f: f[-1] = 999999999.0
-            fps_check[tid] = tuple(f)
-    
-    if len(set(fps_check.values())) > 1:
-        st.error("⚠️ 選択された料金表の区画（MAX）が一致しません。需要構成を集計するには、同じ区画割の料金表のみを選択してください。")
-        st.stop()
-
     # === 現行マスタの確認エリア ===
     with st.expander("📋 現行の料金表マスタを確認する", expanded=False):
         st.markdown("現在選択されている料金表マスタです。")
@@ -206,47 +193,32 @@ if df_usage is not None and df_master is not None:
 
 # 集計ロジック (全件・複数マスタ対応版)
     df_target = df_usage[df_usage['料金表番号'].isin(selected_ids)].copy()
-    
-    results = []
-    for _, row in df_target.iterrows():
+
+    # 顧客1件ごとに、自身の「料金表番号」に該当するマスタを引いて区画名を判定する関数
+    def apply_correct_tier(row):
         tid = row['料金表番号']
-        vol = row['使用量']
-        
-        # そのデータが持つ「料金表番号」専用のマスタを引っ張る
-        m = df_master[df_master['料金表番号'] == tid]
-        
-        current_tier = "不明"
-        if not m.empty:
-            for _, row_m in m.iterrows():
-                # そのマスタのMIN〜MAXの間に収まっているか判定
-                if row_m['MIN'] <= vol <= row_m['MAX']:
-                    current_tier = row_m['区画名']
-                    break
-        
-        results.append({
-            'Current_Tier': current_tier,
-            '使用量': vol
-        })
+        usage = row['使用量']
+        # その顧客の料金表番号専用のマスタを抽出
+        t_master = df_master[df_master['料金表番号'] == tid]
+        # 元々ある完璧な関数 get_tier_name に渡す
+        return get_tier_name(usage, t_master)
 
-    full_results_df = pd.DataFrame(results)
+    # iterrowsループの代わりにapplyを使って全行に一括適用（圧倒的に高速だ）
+    df_target['Current_Tier'] = df_target.apply(apply_correct_tier, axis=1)
 
-    # 【指示1】使用量のカウント(count)で件数を取得
-    if not full_results_df.empty:
-        agg_df = full_results_df.groupby('Current_Tier', as_index=False).agg(
-            件数=('使用量', 'count'),
-            総使用量=('使用量', 'sum')
-        )
-    else:
-        agg_df = pd.DataFrame(columns=['Current_Tier', '件数', '総使用量'])
+    # 使用量のカウント(count)で件数を取得し、総使用量を合算
+    agg_df = df_target.groupby('Current_Tier', as_index=False).agg(
+        件数=('使用量', 'count'),
+        総使用量=('使用量', 'sum')
+    )
     
     agg_df['件数'] = agg_df['件数'].astype(int)
     agg_df['総使用量'] = agg_df['総使用量'].astype(float)
 
-    # 並び順固定 (A, B, C... 不明 の順)
-    tier_order = {'A': 0, 'B': 1, 'C': 2, 'D': 3, 'E': 4, '不明': 99}
+    # 並び順固定（master_repがなくなったため、A, B, C...のアルファベット順を明示的に指定）
+    tier_order = {'A': 0, 'B': 1, 'C': 2, 'D': 3, 'E': 4, 'F': 5, 'Unknown': 99}
     agg_df['order'] = agg_df['Current_Tier'].map(lambda x: tier_order.get(x, 99))
     agg_df = agg_df.sort_values('order').drop(columns=['order'])
-
     # --- 表示 ---
     st.markdown("---")
     total_count = agg_df['件数'].sum()
