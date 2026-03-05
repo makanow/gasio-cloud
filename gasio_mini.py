@@ -91,9 +91,20 @@ def smart_load(file):
 
 def get_tier_name(usage, tariff_df):
     if tariff_df.empty: return "Unknown"
+    # MAXで昇順ソート
     sorted_df = tariff_df.sort_values('MAX').reset_index(drop=True)
-    applicable = sorted_df[sorted_df['MAX'] >= (usage - 1e-9)]
-    row = applicable.iloc[0] if not applicable.empty else sorted_df.iloc[-1]
+    
+    # 修正：使用量がMAXを「超えた」ら次の区画へ行くように、厳密に比較する
+    # 8.01 >= 8.0 は True なので、A区画のMAX(8.0)より大きい場合は
+    # 「MAXが使用量以上である最小の区画」を探すロジックにする
+    applicable = sorted_df[sorted_df['MAX'] >= usage]
+    
+    if applicable.empty:
+        # どのMAXよりも大きい場合は最後の区画（例：C区画）
+        row = sorted_df.iloc[-1]
+    else:
+        # 条件を満たす最初の区画（例：0〜8.0ならA、8.1なら次は40.0をチェックしてB）
+        row = applicable.iloc[0]
     
     for col in ['区画名', '区画']:
         if col in row and pd.notna(row[col]): return str(row[col])
