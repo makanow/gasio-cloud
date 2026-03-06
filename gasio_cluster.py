@@ -97,13 +97,20 @@ if master_file is not None and billing_file is not None:
     summary.rename(columns={'料金表番号': '統合対象の現行プランID'}, inplace=True)
 
     st.markdown("以下の表は、**AIが「需要の形」と「価格」が似ているものを自動でまとめた結果**です。これがGasio計算機Proへ打ち込むべき新プランのベースとなります。")
-    st.dataframe(summary)
+    formatted_summary = summary.copy()
+numeric_cols = ['平均使用量(m3)', '実質単価(円/m3)', '基本料金', '従量単価']
+
+# 各数値を「1,234.5」の形式に変換
+for col in numeric_cols:
+    formatted_summary[col] = formatted_summary[col].map('{:,.1f}'.format)
+
+st.dataframe(formatted_summary)
 
     # --- ステップ5: エクスポート機能（Gasio計算機Pro連携用） ---
-    csv_export = summary.to_csv(index=False).encode('utf-8-sig')
-    st.download_button(
-        label="📥 シミュレーション用指示書（CSV）をエクスポート",
-        data=csv_export,
-        file_name="gasio_ai_cluster_proposal.csv",
-        mime="text/csv",
-    )
+csv_export = formatted_summary.to_csv(index=False, encoding='utf-8-sig')
+st.download_button(
+    label="📥 シミュレーション用指示書（CSV）をエクスポート",
+    data=csv_export,
+    file_name="gasio_ai_cluster_proposal.csv",
+    mime="text/csv",
+)
