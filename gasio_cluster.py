@@ -58,7 +58,7 @@ def get_demo_data():
 # --- サイドバー構成 ---
 with st.sidebar:
     st.markdown("""
-        <h1 style="font-size: 2.4rem; margin-bottom: 0;">
+        <h1 style="font-size: 2.5rem; margin-bottom: 0;">
             <span style="color:#2c3e50">Gas</span><span style="color:#e74c3c">i</span><span style="color:#3498db">o</span> 
             <span style="color:#2c3e50">Cluster</span>
         </h1>
