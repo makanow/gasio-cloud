@@ -4,7 +4,7 @@ from sklearn.cluster import KMeans
 from sklearn.preprocessing import StandardScaler
 import plotly.express as px
 
-# ページ設定（広く使う）
+# 1. ページ全体のレイアウト設定（必ず最初に置く）
 st.set_page_config(layout="wide", page_title="Gasio Cluster AI")
 
 st.title("🤖 Gasio Cluster: AI料金集約エンジン")
@@ -14,31 +14,29 @@ with st.sidebar:
     st.header("📂 データ入力")
     uploaded_file = st.file_uploader("実績CSVをアップロード", type='csv')
     
+    # ファイルが読み込まれたときだけ表示される設定項目
     if uploaded_file:
         st.success("CSV読み込み完了")
-        
         st.divider()
         st.header("⚙️ 解析パラメーター")
         
-        # 1. グループ数の調整
+        # グループ数の調整
         k = st.slider("統合後の目標グループ数", 2, 10, 5)
         
-        # 2. 低使用量層の定義（動的）
+        # 低使用量層の定義（動的）
         low_usage_threshold = st.slider("低使用量層の定義 (m3)", 5, 40, 10, step=5)
         st.caption(f"0.1 ～ {low_usage_threshold}m3 を「低使用量層」と定義")
-        
-        st.divider()
-        st.info("設定を変更すると、右側の解析結果がリアルタイムで更新されます。")
 
 # --- 📈 メイン画面：解析・表示エリア ---
 if uploaded_file:
-    # データ読み込み
+    # データの読み込み
     df_usage = pd.read_csv(uploaded_file)
 
     # ステップ2: 特徴量の抽出（スライダーの値を反映）
     def calc_low_ratio(x):
         active = (x > 0).sum()
-        return ((x > 0) & (x <= low_usage_threshold)).sum() / active if active > 0 else 0
+        if active == 0: return 0
+        return ((x > 0) & (x <= low_usage_threshold)).sum() / active
 
     df_features = df_usage.groupby('料金表番号').agg({
         '当月使用量': ['mean', calc_low_ratio],
@@ -64,7 +62,7 @@ if uploaded_file:
         df_features, x='平均使用量(m3)', y='低使用量層の割合', z='実質単価(円/m3)',
         color='新グループ', hover_name='料金表番号',
         color_discrete_sequence=px.colors.qualitative.Pastel,
-        height=600
+        height=700
     )
     fig.update_layout(margin=dict(l=0, r=0, b=0, t=0))
     st.plotly_chart(fig, use_container_width=True)
@@ -75,15 +73,15 @@ if uploaded_file:
         '料金表番号': lambda x: ', '.join(x.astype(str)),
         '平均使用量(m3)': 'mean',
         '実質単価(円/m3)': 'mean',
-        '平均金額': 'mean' # ベース単価計算用
+        '平均金額': 'mean'
     }).reset_index()
     
-    # 簡易的な基本料金・従量単価の逆算（仮説値）
-    summary['基本料金'] = 1500.0 # 仮の初期値
+    # 簡易的な価格案の計算
+    summary['基本料金'] = 1500.0
     summary['従量単価'] = (summary['平均金額'] - 1500) / summary['平均使用量(m3)']
     summary.rename(columns={'料金表番号': '統合対象の現行プランID'}, inplace=True)
 
-    # 表のスタイリングと表示
+    # 表の表示（右寄せ・フォーマット適用）
     styled_summary = summary.drop(columns=['平均金額']).style.format({
         '平均使用量(m3)': '{:,.1f}', '実質単価(円/m3)': '{:,.1f}',
         '基本料金': '{:,.1f}', '従量単価': '{:,.1f}'
@@ -91,7 +89,7 @@ if uploaded_file:
     
     st.table(styled_summary)
 
-    # --- エクスポート ---
+    # --- エクスポート（サイドバーに配置） ---
     with st.sidebar:
         st.divider()
         csv_data = summary.to_csv(index=False, encoding='utf-8-sig')
@@ -102,4 +100,5 @@ if uploaded_file:
             use_container_width=True
         )
 else:
-    st.info("左側のサイドバーから実績CSVをアップロードしてください。")
+    # ファイルがない時の表示
+    st.info("👈 左側のサイドバーから実績CSVをアップロードしてください。")
