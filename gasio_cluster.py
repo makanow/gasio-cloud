@@ -73,7 +73,7 @@ if file_master and file_usage:
     df_features = df_features.sort_values('新グループ')
 
     # --- 可視化：3Dマップ ---
-    st.subheader("🌌 AI解析（3Dクラスタリング）")
+    st.subheader("AI解析（3Dクラスタリング）")
     
     # ユニークなグループ名をソートしてリスト化（凡例固定用）
     sorted_groups = sorted(df_features['新グループ'].unique())
@@ -91,7 +91,7 @@ if file_master and file_usage:
     st.plotly_chart(fig, use_container_width=True)
 
     # --- 集計：AI集約提案 ---
-    st.header("✨ AI集約提案")
+    st.header("AI集約提案")
     # グループごとに平均値を算出
     summary = df_features.groupby('新グループ').agg({
         '料金プラン名': lambda x: ' / '.join(x.astype(str)),
