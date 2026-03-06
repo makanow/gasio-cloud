@@ -7,36 +7,46 @@ import plotly.express as px
 
 st.set_page_config(layout="wide", page_title="Gasio Cluster AI")
 
-# --- デモデータ生成関数（8プラン版） ---
+# --- デモデータ生成関数（10プラン・高分散版） ---
 def get_demo_data():
-    # 8つの多様なプランを生成
+    # 10の多様なプラン名称
     plan_names = [
         '一般Aプラン', 'ゆったりBプラン', '暖房Cプラン', '厨房特約D', 
-        'エコジョーズE', '店舗用F', '大口G', '福祉割引H'
+        'エコジョーズE', '店舗用F', '大口工業用G', '福祉割引H',
+        '高効率給湯器I', '夏期集中J'
     ]
     
     master_rows = []
     usage_rows = []
     
-    # 乱数シードを固定して挙動を安定させる
-    np.random.seed(42)
+    np.random.seed(42) # 再現性を確保
     
     for i, name in enumerate(plan_names):
         plan_id = i + 1
-        # プランごとに特性（使用量分布）を変える
-        avg_usage = np.random.choice([12, 25, 45, 120]) 
         
-        # 料金表マスタ：各プラン2区画（0-20, 20-）
-        base_f = np.random.randint(8, 30) * 100
-        unit_p = np.random.randint(120, 250)
+        # --- 戦略的に分布を散らす ---
+        # 1. 平均使用量を4つのセグメントに分ける
+        avg_usage = np.random.choice([12, 28, 55, 150]) 
         
-        # 区画1
-        master_rows.append([plan_id, name, 0, 19.9, base_f, unit_p])
-        # 区画2 (少し基本料金を上げて単価を下げる)
-        master_rows.append([plan_id, name, 20, 999, base_f + 500, unit_p - 20])
+        # 2. 基本料金と従量単価に相関を持たせつつノイズを加える
+        # 使用量が多いプランほど基本料金が高く、単価が低い傾向にする
+        if avg_usage < 20:
+            base_f = np.random.randint(800, 1200)
+            unit_p = np.random.randint(220, 260)
+        elif avg_usage < 40:
+            base_f = np.random.randint(1300, 1800)
+            unit_p = np.random.randint(180, 210)
+        else:
+            base_f = np.random.randint(2000, 3500)
+            unit_p = np.random.randint(130, 170)
         
-        # 実績データ：1プランあたり15〜20レコード生成
-        samples = np.random.normal(avg_usage, avg_usage*0.3, 20).clip(1, 300)
+        # 料金表マスタ：2区画生成
+        master_rows.append([plan_id, name, 0, 20.0, base_f, unit_p])
+        master_rows.append([plan_id, name, 20.1, 9999, base_f + 400, unit_p - 15])
+        
+        # 実績データ：1プランあたり25レコード（計250データ）
+        # 分散(std)を大きめにしてプロットを散らす
+        samples = np.random.normal(avg_usage, avg_usage * 0.4, 25).clip(1, 400)
         for val in samples:
             usage_rows.append([plan_id, val])
 
@@ -62,25 +72,26 @@ with st.sidebar:
     
     st.divider()
     st.header("⚙️ 解析パラメーター")
-    # プランが増えたので、デフォルトのk（グループ数）を3に設定
-    k = st.slider("統合後の目標グループ数", 2, 8, 3)
+    # 10プランあるのでkの最大値を10に
+    k = st.slider("統合後の目標グループ数", 2, 10, 4)
     low_usage_threshold = st.slider("低使用量層の定義 (m3)", 5, 40, 10, step=5)
 
 # --- データ読み込みロジック ---
 if file_master and file_usage:
     df_m = pd.read_csv(file_master)
     df_u = pd.read_csv(file_usage)
-    st.toast("✅ アップロードされたデータを解析中...")
+    st.toast("✅ アップロードデータを解析中...")
 else:
     df_m, df_u = get_demo_data()
-    st.info(f"💡 現在はデモデータ（現行{df_m['料金プランID'].nunique()}プラン）を表示中。")
+    st.info(f"💡 デモデータ（現行{df_m['料金プランID'].nunique()}プラン）を表示中。")
 
 # --- 解析エンジン本体 ---
 df_u = df_u.rename(columns={'使用量': '使用量_u', '料金表番号': '料金表番号_u'})
 df_m = df_m.rename(columns={'料金プランID': '料金表番号_m'})
 
 merged = pd.merge(df_u, df_m, left_on='料金表番号_u', right_on='料金表番号_m', how='left')
-df_calc = merged[(merged['使用量_u'] >= merged['下限']) & (merged['使用量_u'] <= merged['上限'])].copy()
+# 数値型に強制変換してエラー回避
+df_calc = merged[(merged['使用量_u'] >= merged['下限'].astype(float)) & (merged['使用量_u'] <= merged['上限'].astype(float))].copy()
 df_calc['当月金額'] = df_calc['基本料金'] + (df_calc['使用量_u'] * df_calc['従量単価'])
 
 base_fees = df_m.sort_values(['料金表番号_m', '下限']).groupby('料金表番号_m').head(1)[['料金表番号_m', '基本料金']]
@@ -120,8 +131,8 @@ fig = px.scatter_3d(
     color='新グループ', 
     hover_name='料金プラン名',
     category_orders={"新グループ": sorted_groups},
-    color_discrete_sequence=px.colors.qualitative.Safe,
-    height=700
+    color_discrete_sequence=px.colors.qualitative.Dark24, # より明確な色分け
+    height=750
 )
 fig.update_layout(margin=dict(l=0, r=0, b=0, t=0))
 st.plotly_chart(fig, use_container_width=True)
