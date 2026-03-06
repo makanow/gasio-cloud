@@ -86,7 +86,7 @@ if master_file is not None and billing_file is not None:
     # --- ステップ4: 解析結果の表示 ---
     st.header("✨ AI集約提案結果")
     
-    # グループごとのサマリー
+    # グループごとのサマリー計算
     summary = df_features.groupby('新グループ').agg({
         '料金表番号': lambda x: ', '.join(x.astype(str)),
         '平均使用量(m3)': 'mean',
@@ -97,20 +97,29 @@ if master_file is not None and billing_file is not None:
     summary.rename(columns={'料金表番号': '統合対象の現行プランID'}, inplace=True)
 
     st.markdown("以下の表は、**AIが「需要の形」と「価格」が似ているものを自動でまとめた結果**です。これがGasio計算機Proへ打ち込むべき新プランのベースとなります。")
+    
+    # 表示用データの整形（コピーを作成）
     formatted_summary = summary.copy()
-numeric_cols = ['平均使用量(m3)', '実質単価(円/m3)', '基本料金', '従量単価']
+    numeric_cols = ['平均使用量(m3)', '実質単価(円/m3)', '基本料金', '従量単価']
 
-# 各数値を「1,234.5」の形式に変換
-for col in numeric_cols:
-    formatted_summary[col] = formatted_summary[col].map('{:,.1f}'.format)
+    # 桁区切りと小数点第1位に統一
+    for col in numeric_cols:
+        formatted_summary[col] = formatted_summary[col].map('{:,.1f}'.format)
 
-st.dataframe(formatted_summary)
+    # 【重要】数値列を右寄せにするスタイリング設定
+    styled_summary = formatted_summary.style.set_properties(**{
+        'text-align': 'right'
+    }, subset=numeric_cols)
+
+    # テーブルの表示（styled_summaryを渡す）
+    st.dataframe(styled_summary, use_container_width=True)
 
     # --- ステップ5: エクスポート機能（Gasio計算機Pro連携用） ---
-csv_export = formatted_summary.to_csv(index=False, encoding='utf-8-sig')
-st.download_button(
-    label="📥 シミュレーション用指示書（CSV）をエクスポート",
-    data=csv_export,
-    file_name="gasio_ai_cluster_proposal.csv",
-    mime="text/csv",
-)
+    # CSV出力用には、フォーマット済みのデータを使用
+    csv_data = formatted_summary.to_csv(index=False, encoding='utf-8-sig')
+    st.download_button(
+        label="📥 シミュレーション用指示書（CSV）をエクスポート",
+        data=csv_data,
+        file_name="gasio_ai_cluster_proposal.csv",
+        mime="text/csv",
+    )
