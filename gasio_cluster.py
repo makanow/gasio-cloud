@@ -91,7 +91,7 @@ if file_master and file_usage:
     st.plotly_chart(fig, use_container_width=True)
 
     # --- 集計：AI集約提案 ---
-    st.header("AI集約提案")
+    st.subheader("AI集約提案")
     # グループごとに平均値を算出
     summary = df_features.groupby('新グループ').agg({
         '料金プラン名': lambda x: ' / '.join(x.astype(str)),
