@@ -3,6 +3,7 @@ import pandas as pd
 from sklearn.cluster import KMeans
 from sklearn.preprocessing import StandardScaler
 import numpy as np
+import plotly.express as px
 
 # --- ページ設定 ---
 st.set_page_config(page_title="Gasio Cluster (AI料金集約エンジン)", layout="wide")
@@ -62,7 +63,26 @@ if master_file is not None and billing_file is not None:
     df_features['新グループ'] = kmeans.fit_predict(scaled_features)
     # 分かりやすくA, B, C...に変換
     df_features['新グループ'] = df_features['新グループ'].apply(lambda x: chr(65 + x)) 
+    
+    # --- ステップ3.5: AIの脳内宇宙（3D可視化） ---
+    st.subheader("🌌 AIの脳内マップ（3Dクラスタリング空間）")
+    st.markdown("各点が1つの現行料金プラン（料金表番号）を表します。同じ色の玉は、AIが「DNAが似ている」と判断して同じグループに分類したものです。**マウスでドラッグして宇宙を回し、各点にカーソルを合わせてみてください。**")
 
+    fig = px.scatter_3d(
+        df_features,
+        x='平均使用量(m3)',
+        y='低使用量層の割合',
+        z='実質単価(円/m3)',
+        color='新グループ',
+        hover_name='料金表番号', # マウスを乗せたらプラン番号が出る
+        hover_data={'新グループ': True, '平均使用量(m3)': ':.1f', '低使用量層の割合': ':.1%', '実質単価(円/m3)': ':.1f'},
+        color_discrete_sequence=px.colors.qualitative.Pastel # 見やすい配色
+    )
+
+    # グラフの余白を削ってダイナミックに表示
+    fig.update_layout(margin=dict(l=0, r=0, b=0, t=0), height=600)
+    st.plotly_chart(fig, use_container_width=True)
+    
     # --- ステップ4: 解析結果の表示 ---
     st.header("✨ AI集約提案結果")
     
