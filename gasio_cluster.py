@@ -8,7 +8,7 @@ st.set_page_config(layout="wide", page_title="Gasio Cluster AI")
 
 with st.sidebar:
     # HTMLのインラインスタイルを使ってフォントサイズを強制指定
-    st.markdown('<h1 style="font-size: 2.5rem; margin-bottom: 0;">🤖 Gasio Cluster</h1>', unsafe_allow_html=True)
+    st.markdown('<h1 style="font-size: 2.2rem; margin-bottom: 0;">🤖 Gasio Cluster</h1>', unsafe_allow_html=True)
     st.caption("AI料金集約エンジン")
     st.divider()
     
