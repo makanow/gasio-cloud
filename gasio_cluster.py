@@ -7,8 +7,8 @@ import plotly.express as px
 st.set_page_config(layout="wide", page_title="Gasio Cluster AI")
 
 with st.sidebar:
-# メイン画面から移動し、サイドバーの最上部にタイトルを表示
-    st.title("🤖 Gasio Cluster")
+    # HTMLのインラインスタイルを使ってフォントサイズを強制指定
+    st.markdown('<h1 style="font-size: 2.5rem; margin-bottom: 0;">🤖 Gasio Cluster</h1>', unsafe_allow_html=True)
     st.caption("AI料金集約エンジン")
     st.divider()
     
