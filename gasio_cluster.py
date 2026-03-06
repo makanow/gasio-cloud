@@ -83,10 +83,10 @@ if master_file is not None and billing_file is not None:
     fig.update_layout(margin=dict(l=0, r=0, b=0, t=0), height=600)
     st.plotly_chart(fig, use_container_width=True)
     
-    # --- ステップ4: 解析結果の表示 ---
+# --- ステップ4: 解析結果の表示 ---
     st.header("✨ AI集約提案結果")
     
-    # グループごとのサマリー計算
+    # 1. 元の数値データのまま計算
     summary = df_features.groupby('新グループ').agg({
         '料金表番号': lambda x: ', '.join(x.astype(str)),
         '平均使用量(m3)': 'mean',
@@ -96,27 +96,34 @@ if master_file is not None and billing_file is not None:
     }).reset_index()
     summary.rename(columns={'料金表番号': '統合対象の現行プランID'}, inplace=True)
 
-    st.markdown("以下の表は、**AIが「需要の形」と「価格」が似ているものを自動でまとめた結果**です。これがGasio計算機Proへ打ち込むべき新プランのベースとなります。")
+    st.markdown("以下の表は、**AIが「需要の形」と「価格」が似ているものを自動でまとめた結果**です。")
     
-    # 表示用データの整形（コピーを作成）
-    formatted_summary = summary.copy()
-    numeric_cols = ['平均使用量(m3)', '実質単価(円/m3)', '基本料金', '従量単価']
+    # 2. 列ごとの設定（桁区切り・小数点・右寄せ）を定義
+    # Streamlitの最新機能 column_config を使って強制的に整える
+    column_configuration = {
+        "新グループ": st.column_config.TextColumn("新グループ"),
+        "統合対象の現行プランID": st.column_config.TextColumn("統合対象の現行プランID"),
+        "平均使用量(m3)": st.column_config.NumberColumn("平均使用量(m3)", format="#,##0.1f"),
+        "実質単価(円/m3)": st.column_config.NumberColumn("実質単価(円/m3)", format="#,##0.1f"),
+        "基本料金": st.column_config.NumberColumn("基本料金", format="#,##0.1f"),
+        "従量単価": st.column_config.NumberColumn("従量単価", format="#,##0.1f"),
+    }
 
-    # 桁区切りと小数点第1位に統一
-    for col in numeric_cols:
-        formatted_summary[col] = formatted_summary[col].map('{:,.1f}'.format)
+    # 3. 表示（数値データのまま渡し、設定で見た目を変える）
+    st.dataframe(
+        summary,
+        column_config=column_configuration,
+        use_container_width=True,
+        hide_index=True
+    )
 
-    # 【重要】数値列を右寄せにするスタイリング設定
-    styled_summary = formatted_summary.style.set_properties(**{
-        'text-align': 'right'
-    }, subset=numeric_cols)
-
-    # テーブルの表示（styled_summaryを渡す）
-    st.dataframe(styled_summary, use_container_width=True)
-
-    # --- ステップ5: エクスポート機能（Gasio計算機Pro連携用） ---
-    # CSV出力用には、フォーマット済みのデータを使用
-    csv_data = formatted_summary.to_csv(index=False, encoding='utf-8-sig')
+    # --- ステップ5: エクスポート機能（CSV） ---
+    # CSV用には別途フォーマットしたものを準備
+    formatted_for_csv = summary.copy()
+    for col in ["平均使用量(m3)", "実質単価(円/m3)", "基本料金", "従量単価"]:
+        formatted_for_csv[col] = formatted_for_csv[col].map('{:,.1f}'.format)
+        
+    csv_data = formatted_for_csv.to_csv(index=False, encoding='utf-8-sig')
     st.download_button(
         label="📥 シミュレーション用指示書（CSV）をエクスポート",
         data=csv_data,
