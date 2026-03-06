@@ -7,8 +7,13 @@ import plotly.express as px
 st.set_page_config(layout="wide", page_title="Gasio Cluster AI")
 
 with st.sidebar:
-    # HTMLのインラインスタイルを使ってフォントサイズを強制指定
-    st.markdown('<h1 style="font-size: 2.2rem; margin-bottom: 0;">🤖 Gasio Cluster</h1>', unsafe_allow_html=True)
+    # 電卓(Pro)と統一感のある配色を適用
+    st.markdown("""
+        <h1 style="font-size: 2.2rem; margin-bottom: 0;">
+            <span style="color:#2c3e50">Gas</span><span style="color:#e74c3c">i</span><span style="color:#3498db">o</span> 
+            <span style="color:#2c3e50">Cluster</span>
+        </h1>
+        """, unsafe_allow_html=True)
     st.caption("AI料金集約エンジン")
     st.divider()
     
