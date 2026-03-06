@@ -24,24 +24,23 @@ with st.sidebar:
     file_master = st.file_uploader("① 料金表マスタ(CSV)", type='csv')
     file_usage = st.file_uploader("② 実績データ(CSV)", type='csv')
     
-    # ファイルの有無に関わらず、プレゼン用にパラメータを表示
+    # プレゼン用に常にパラメータを表示するように変更
     if file_master and file_usage:
         st.success("カスタムデータを認識しました")
     else:
-        st.info("💡 デモデータで動作中（ファイルを置くと切り替わります）")
+        st.info("💡 デモデータで動作中")
         
     st.divider()
     st.header("⚙️ 解析パラメーター")
     k = st.slider("統合後の目標グループ数", 2, 10, 5)
     low_usage_threshold = st.slider("低使用量層の定義 (m3)", 5, 40, 10, step=5)
 
-# --- 📊 データ読み込み・生成ロジック ---
+# --- 📊 データ読み込み・生成（ここがエラーの原因だった） ---
 if file_master and file_usage:
     df_m = pd.read_csv(file_master)
     df_u = pd.read_csv(file_usage)
 else:
-    # プレゼン用：リアリティのあるデモデータをその場で生成
-    # マスタデータ（5つの既存プラン）
+    # デモデータも「元の列名」で作成することで、下のrename処理と整合させる
     df_m = pd.DataFrame([
         {'料金プランID': 1, '料金プラン名': '一般A', '下限': 0, '上限': 100, '基本料金': 1000, '従量単価': 320},
         {'料金プランID': 2, '料金プラン名': '一般B', '下限': 0, '上限': 100, '基本料金': 1100, '従量単価': 310},
@@ -49,18 +48,13 @@ else:
         {'料金プランID': 4, '料金プラン名': '業務用L', '下限': 0, '上限': 100, '基本料金': 5000, '従量単価': 190},
         {'料金プランID': 5, '料金プラン名': '特約S', '下限': 0, '上限': 100, '基本料金': 1500, '従量単価': 280},
     ])
-    # 実績データ（バラつきのある100件のサンプル）
     np.random.seed(42)
-    demo_usage = []
-    for _ in range(100):
-        p_id = np.random.choice([1, 2, 3, 4, 5])
-        # プラン特性に合わせた使用量を生成（暖房や業務用は多め）
-        base_vol = 15 if p_id < 3 else (45 if p_id == 3 else 80)
-        vol = np.random.normal(base_vol, base_vol*0.3)
-        demo_usage.append({'料金表番号': p_id, '使用量': max(0.1, vol)})
-    df_u = pd.DataFrame(demo_usage)
+    df_u = pd.DataFrame({
+        '料金表番号': np.random.choice([1, 2, 3, 4, 5], 100),
+        '使用量': np.random.uniform(5, 60, 100)
+    })
 
-# --- 📈 メイン解析ロジック（構造変更なし） ---
+# --- 📈 メイン解析ロジック（ここからは一切変更なし） ---
 
 # 1. 列名調整
 df_u = df_u.rename(columns={'使用量': '使用量_u', '料金表番号': '料金表番号_u'})
