@@ -5,9 +5,13 @@ from sklearn.preprocessing import StandardScaler
 import plotly.express as px
 
 st.set_page_config(layout="wide", page_title="Gasio Cluster AI")
-st.title("🤖 Gasio Cluster")
 
 with st.sidebar:
+# メイン画面から移動し、サイドバーの最上部にタイトルを表示
+    st.title("🤖 Gasio Cluster")
+    st.caption("AI料金集約エンジン")
+    st.divider()
+    
     st.header("📂 データ入力")
     file_master = st.file_uploader("① 料金表マスタ(CSV)", type='csv')
     file_usage = st.file_uploader("② 実績データ(CSV)", type='csv')
