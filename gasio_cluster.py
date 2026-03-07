@@ -110,10 +110,20 @@ try:
         '使用量_u': ['mean', calc_low_ratio],
         '当月金額': 'mean'
     }).reset_index()
+    # --- 指標の計算と丸め処理（ここを最新に更新） ---
     df_features.columns = ['料金表番号', '料金プラン名', '平均使用量(m3)', 'tmp_ratio', '平均金額']
-    df_features['設備利用率'] = (1 - df_features['tmp_ratio']) * 100
-    df_features['実質単価(円/m3)'] = df_features['平均金額'] / df_features['平均使用量(m3)'].replace(0, 1)
-    df_features = pd.merge(df_features, base_fees, left_on='料金表番号', right_on='料金表番号_m', how='left')
+    
+    # 設備利用率：(1 - 低利用率) * 100 を小数点第1位で丸める
+    df_features['設備利用率'] = ((1 - df_features['tmp_ratio']) * 100).round(1)
+    
+    # 実質単価：平均金額 / 平均使用量 を小数点第1位で丸める
+    df_features['実質単価(円/m3)'] = (df_features['平均金額'] / df_features['平均使用量(m3)'].replace(0, 1)).round(1)
+    
+    # 平均使用量も第1位で丸める
+    df_features['平均使用量(m3)'] = df_features['平均使用量(m3)'].round(1)
+
+    # 不要なカラムを削除してマスタと結合
+    df_features = pd.merge(df_features.drop(columns=['tmp_ratio']), base_fees, left_on='料金表番号', right_on='料金表番号_m', how='left')
 
     features = ['平均使用量(m3)', '設備利用率', '実質単価(円/m3)']
     X = df_features[features].fillna(0)
