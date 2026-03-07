@@ -85,19 +85,34 @@ else:
     df_m, df_u = get_demo_data()
     st.info(f"💡 デモデータ（現行{df_m['料金プランID'].nunique()}プラン）を表示中。")
 
-# --- 解析エンジン本体（修正版） ---
+# --- 解析エンジン本体（ここから修正） ---
+# ここは「if/else」の外側で、df_m, df_u が確実に存在する状態で実行する
+df_u_proc = df_u.rename(columns={'使用量': '使用量_u', '料金表番号': '料金表番号_u'})
+df_m_proc = df_m.rename(columns={'料金プランID': '料金表番号_m'})
+
+merged = pd.merge(df_u_proc, df_m_proc, left_on='料金表番号_u', right_on='料金表番号_m', how='left')
+
+# df_calc をここで確実に定義する
+df_calc = merged[(merged['使用量_u'] >= merged['下限'].astype(float)) & (merged['使用量_u'] <= merged['上限'].astype(float))].copy()
+df_calc['当月金額'] = df_calc['基本料金'] + (df_calc['使用量_u'] * df_calc['従量単価'])
+
+# 基本料金の取得
+base_fees = df_m_proc.sort_values(['料金表番号_m', '下限']).groupby('料金表番号_m').head(1)[['料金表番号_m', '基本料金']]
+base_fees.columns = ['料金表番号_m', 'マスタ基本料金']
+
 def calc_low_ratio(x):
     active = (x > 0).sum()
     return ((x > 0) & (x <= low_usage_threshold)).sum() / active if active > 0 else 0
 
+# 集計処理
 df_features = df_calc.groupby(['料金表番号_u', '料金プラン名']).agg({
     '使用量_u': ['mean', calc_low_ratio],
     '当月金額': 'mean'
 }).reset_index()
 
-# カラム名を整理し「設備利用率」に変換
+# カラム名の整理と「設備利用率」への変換
 df_features.columns = ['料金表番号', '料金プラン名', '平均使用量(m3)', 'tmp_ratio', '平均金額']
-df_features['設備利用率'] = 1 - df_features['tmp_ratio'] # ここで反転
+df_features['設備利用率'] = 1 - df_features['tmp_ratio']  # ナガセの狙い通り反転！
 df_features['実質単価(円/m3)'] = df_features['平均金額'] / df_features['平均使用量(m3)'].replace(0, 1)
 df_features = pd.merge(df_features, base_fees, left_on='料金表番号', right_on='料金表番号_m', how='left')
 
