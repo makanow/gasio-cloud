@@ -78,21 +78,36 @@ with st.sidebar:
 
     st.caption(f"💡 **設備利用率とは**: {low_usage_threshold}m3を超える使用量の割合。数値が高いほど、供給設備の稼働率が高い。")
 
-# --- データ読み込みロジック ---
+# --- データ読み込みロジック（ヘッダー判定方式へアップグレード） ---
 if file_master and file_usage:
-    df_m = pd.read_csv(file_master)
-    df_u = pd.read_csv(file_usage)
-    st.toast("✅ アップロードデータを解析中...")
+    # 料金表マスタの読み込みと列名変換
+    df_m_raw = pd.read_csv(file_master)
+    m_rename_map = {
+        '料金プランID': '料金表番号_m', '料金表番号': '料金表番号_m', 'ID': '料金表番号_m',
+        '料金プラン名': '料金プラン名', '料金表名': '料金プラン名', 'プラン名': '料金プラン名',
+        '下限': '下限', 'MIN': '下限', '上限': '上限', 'MAX': '上限',
+        '基本料金': '基本料金', '従量単価': '従量単価'
+    }
+    df_m = df_m_raw.rename(columns=m_rename_map)
+    
+    # 実績データの読み込みと列名変換
+    df_u_raw = pd.read_csv(file_usage)
+    u_rename_map = {
+        '料金表番号': '料金表番号_u', '料金表ID': '料金表番号_u', 'ID': '料金表番号_u',
+        '使用量': '使用量_u', 'Volume': '使用量_u'
+    }
+    df_u = df_u_raw.rename(columns=u_rename_map)
+    st.toast("✅ ヘッダー判定によるデータ解析を完了しました")
 else:
-    df_m, df_u = get_demo_data()
-    st.info(f"💡 デモデータ（現行{df_m['料金プランID'].nunique()}プラン）を表示中。")
+    # デモデータの場合も、後続の処理と整合性を取るためカラム名を合わせる
+    df_m_demo, df_u_demo = get_demo_data()
+    df_m = df_m_demo.rename(columns={'料金プランID': '料金表番号_m'})
+    df_u = df_u_demo.rename(columns={'使用量': '使用量_u', '料金表番号': '料金表番号_u'})
+    st.info(f"💡 デモデータ（現行{df_m['料金表番号_m'].nunique()}プラン）を表示中。")
 
-# --- 解析エンジン本体（ここから修正） ---
-# ここは「if/else」の外側で、df_m, df_u が確実に存在する状態で実行する
-df_u_proc = df_u.rename(columns={'使用量': '使用量_u', '料金表番号': '料金表番号_u'})
-df_m_proc = df_m.rename(columns={'料金プランID': '料金表番号_m'})
-
-merged = pd.merge(df_u_proc, df_m_proc, left_on='料金表番号_u', right_on='料金表番号_m', how='left')
+# --- 解析エンジン本体 ---
+# (読み込み段階でリネーム済みのため、そのままマージへ移行)
+merged = pd.merge(df_u, df_m, left_on='料金表番号_u', right_on='料金表番号_m', how='left')
 
 # df_calc をここで確実に定義する
 df_calc = merged[(merged['使用量_u'] >= merged['下限'].astype(float)) & (merged['使用量_u'] <= merged['上限'].astype(float))].copy()
