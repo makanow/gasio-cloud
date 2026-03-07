@@ -65,77 +65,41 @@ with st.sidebar:
         """, unsafe_allow_html=True)
     st.caption("AI料金集約エンジン")
     st.divider()
-
-    # --- 1. パラメーター定義（NameErrorを防ぐため、必ず最初に行う） ---
-    st.header("⚙️ 解析パラメーター")
-    k = st.slider("統合後の目標グループ数", 2, 10, 4)
-    low_usage_threshold = st.slider("設備利用率の閾値 (m3)", 5, 40, 10, step=5)
-    st.caption(f"💡 **設備利用率とは**: {low_usage_threshold}m3を超える使用量の割合。")
-    st.divider()
-
-    # --- 2. サンプル生成関数（中身もしっかり記述） ---
-    def get_sample_usage_csv():
-        df = pd.DataFrame({'料金表番号': [1, 1, 2, 2, 3], '使用量': [12.5, 28.0, 5.0, 45.3, 150.0]})
-        return df.to_csv(index=False).encode('utf-8-sig')
-
-    def get_sample_master_csv():
-        df = pd.DataFrame({
-            '料金表番号': [1, 1, 2, 2, 3, 3],
-            '料金プラン名': ['一般A', '一般A', 'ゆったりB', 'ゆったりB', '工業用C', '工業用C'],
-            '下限': [0, 20.1, 0, 20.1, 0, 50.1], '上限': [20.0, 9999, 20.0, 9999, 50.0, 9999],
-            '基本料金': [1000, 1400, 1500, 1900, 3000, 3500], '従量単価': [250, 235, 200, 185, 150, 135]
-        })
-        return df.to_csv(index=False).encode('utf-8-sig')
     
-    # --- 3. データ入力ガイダンス ---
     st.header("📂 データ入力")
-    with st.expander("ℹ️ CSVインポートガイダンス", expanded=False):
-        st.markdown("""
-        **【1. 料金表マスタCSV】**
-        - `料金表番号`, `下限`, `上限`, `基本料金`, `従量単価`
-        **【2. 実績データCSV】**
-        - `料金表番号`, `使用量`
-        """)
-        st.download_button("📥 料金表サンプルCSV", get_sample_master_csv(), "sample_master.csv", "text/csv", use_container_width=True)
-        st.download_button("📥 使用量サンプルCSV", get_sample_usage_csv(), "sample_usage.csv", "text/csv", use_container_width=True)
-
     file_master = st.file_uploader("① 料金表マスタ(CSV)", type='csv')
     file_usage = st.file_uploader("② 実績データ(CSV)", type='csv')
+    
+    st.divider()
+    st.header("⚙️ 解析パラメーター")
+    # 10プランあるのでkの最大値を10に
+    k = st.slider("統合後の目標グループ数", 2, 10, 4)
+    low_usage_threshold = st.slider("設備利用率の閾値 (m3)", 5, 40, 10, step=5)
+
+    st.caption(f"💡 **設備利用率とは**: {low_usage_threshold}m3を超える使用量の割合。数値が高いほど、供給設備の稼働率が高い。")
 
 # --- データ読み込みロジック ---
 if file_master and file_usage:
-    df_m_raw = pd.read_csv(file_master)
-    m_rename_map = {
-        '料金プランID': '料金表番号_m', '料金表番号': '料金表番号_m', 'ID': '料金表番号_m',
-        '料金プラン名': '料金プラン名', '料金表名': '料金プラン名', 'プラン名': '料金プラン名',
-        '下限': '下限', 'MIN': '下限', '上限': '上限', 'MAX': '上限',
-        '基本料金': '基本料金', '従量単価': '従量単価'
-    }
-    df_m = df_m_raw.rename(columns=m_rename_map)
-    
-    df_u_raw = pd.read_csv(file_usage)
-    u_rename_map = {
-        '料金表番号': '料金表番号_u', '料金表ID': '料金表番号_u', 'ID': '料金表番号_u',
-        '使用量': '使用量_u', 'Volume': '使用量_u'
-    }
-    df_u = df_u_raw.rename(columns=u_rename_map)
-    st.toast("✅ ヘッダー判定完了")
+    df_m = pd.read_csv(file_master)
+    df_u = pd.read_csv(file_usage)
+    st.toast("✅ アップロードデータを解析中...")
 else:
-    df_m_demo, df_u_demo = get_demo_data()
-    df_m = df_m_demo.rename(columns={'料金プランID': '料金表番号_m'})
-    df_u = df_u_demo.rename(columns={'使用量': '使用量_u', '料金表番号': '料金表番号_u'})
-    # st.info の部分は元のコードのまま
+    df_m, df_u = get_demo_data()
+    st.info(f"💡 デモデータ（現行{df_m['料金プランID'].nunique()}プラン）を表示中。")
 
-# --- 解析エンジン本体 ---
-# (読み込み段階でリネーム済みのため、そのままマージへ移行)
-merged = pd.merge(df_u, df_m, left_on='料金表番号_u', right_on='料金表番号_m', how='left')
+# --- 解析エンジン本体（ここから修正） ---
+# ここは「if/else」の外側で、df_m, df_u が確実に存在する状態で実行する
+df_u_proc = df_u.rename(columns={'使用量': '使用量_u', '料金表番号': '料金表番号_u'})
+df_m_proc = df_m.rename(columns={'料金プランID': '料金表番号_m'})
+
+merged = pd.merge(df_u_proc, df_m_proc, left_on='料金表番号_u', right_on='料金表番号_m', how='left')
 
 # df_calc をここで確実に定義する
 df_calc = merged[(merged['使用量_u'] >= merged['下限'].astype(float)) & (merged['使用量_u'] <= merged['上限'].astype(float))].copy()
 df_calc['当月金額'] = df_calc['基本料金'] + (df_calc['使用量_u'] * df_calc['従量単価'])
 
-# 基本料金の取得（df_m を使用するように修正）
-base_fees = df_m.sort_values(['料金表番号_m', '下限']).groupby('料金表番号_m').head(1)[['料金表番号_m', '基本料金']]
+# 基本料金の取得
+base_fees = df_m_proc.sort_values(['料金表番号_m', '下限']).groupby('料金表番号_m').head(1)[['料金表番号_m', '基本料金']]
 base_fees.columns = ['料金表番号_m', 'マスタ基本料金']
 
 def calc_low_ratio(x):
