@@ -76,105 +76,111 @@ with st.sidebar:
         sample_m, sample_u = get_demo_data()
         st.download_button("📋 料金表マスタ (CSV)", sample_m.to_csv(index=False, encoding='utf-8-sig'), "sample_master.csv", use_container_width=True)
         st.download_button("📊 実績データ (CSV)", sample_u.to_csv(index=False, encoding='utf-8-sig'), "sample_usage.csv", use_container_width=True)
-        
         st.markdown("---")
         st.subheader("2. アップロード")
         file_master = st.file_uploader("料金表マスタ(CSV)", type='csv')
         file_usage = st.file_uploader("実績データ(CSV)", type='csv')
 
-# 5. データロードの確定
+# 5. データロード
 if file_master and file_usage:
     df_m = safe_read_csv(file_master)
     df_u = safe_read_csv(file_usage)
 else:
     df_m, df_u = get_demo_data()
-    with st.sidebar:
-        st.info("💡 デモデータでシミュレーション中。")
+
+# --- 追加機能：プラン選択フィルタ ---
+with st.sidebar:
+    st.divider()
+    st.header("🔍 解析対象の選択")
+    all_plans = sorted(df_m['料金プラン名'].unique())
+    selected_plans = st.multiselect(
+        "解析に含めるプランを選択", 
+        options=all_plans, 
+        default=all_plans,
+        help="チェックを外したプランはクラスタリング計算から除外されます。"
+    )
 
 # 6. 解析ロジック本体
 try:
-    df_u_proc = df_u.rename(columns={'使用量': '使用量_u', '料金表番号': '料金表番号_u'})
-    df_m_proc = df_m.rename(columns={'料金プランID': '料金表番号_m'})
-    merged = pd.merge(df_u_proc, df_m_proc, left_on='料金表番号_u', right_on='料金表番号_m', how='left')
-    df_calc = merged[(merged['使用量_u'] >= merged['下限'].astype(float)) & (merged['使用量_u'] <= merged['上限'].astype(float))].copy()
-    df_calc['当月金額'] = df_calc['基本料金'] + (df_calc['使用量_u'] * df_calc['従量単価'])
-    
-    base_fees = df_m_proc.sort_values(['料金表番号_m', '下限']).groupby('料金表番号_m').head(1)[['料金表番号_m', '基本料金']]
-    base_fees.columns = ['料金表番号_m', 'マスタ基本料金']
+    if not selected_plans:
+        st.warning("⚠️ 解析対象のプランを1つ以上選択してください。")
+    else:
+        # フィルタリング実行
+        df_m_filtered = df_m[df_m['料金プラン名'].isin(selected_plans)]
+        
+        # 処理開始
+        df_u_proc = df_u.rename(columns={'使用量': '使用量_u', '料金表番号': '料金表番号_u'})
+        df_m_proc = df_m_filtered.rename(columns={'料金プランID': '料金表番号_m'})
+        
+        # フィルタ後のマスタに存在するデータのみをマージ
+        merged = pd.merge(df_u_proc, df_m_proc, left_on='料金表番号_u', right_on='料金表番号_m', how='inner')
+        
+        df_calc = merged[(merged['使用量_u'] >= merged['下限'].astype(float)) & (merged['使用量_u'] <= merged['上限'].astype(float))].copy()
+        df_calc['当月金額'] = df_calc['基本料金'] + (df_calc['使用量_u'] * df_calc['従量単価'])
+        
+        base_fees = df_m_proc.sort_values(['料金表番号_m', '下限']).groupby('料金表番号_m').head(1)[['料金表番号_m', '基本料金']]
+        base_fees.columns = ['料金表番号_m', 'マスタ基本料金']
 
-    def calc_low_ratio(x):
-        active = (x > 0).sum()
-        return ((x > 0) & (x <= low_usage_threshold)).sum() / active if active > 0 else 0
+        def calc_low_ratio(x):
+            active = (x > 0).sum()
+            return ((x > 0) & (x <= low_usage_threshold)).sum() / active if active > 0 else 0
 
-    df_features = df_calc.groupby(['料金表番号_u', '料金プラン名']).agg({
-        '使用量_u': ['mean', calc_low_ratio],
-        '当月金額': 'mean'
-    }).reset_index()
-    # --- 指標の計算と丸め処理（ここを最新に更新） ---
-    df_features.columns = ['料金表番号', '料金プラン名', '平均使用量(m3)', 'tmp_ratio', '平均金額']
-    
-    # 設備利用率：(1 - 低利用率) * 100 を小数点第1位で丸める
-    df_features['設備利用率'] = ((1 - df_features['tmp_ratio']) * 100).round(1)
-    
-    # 実質単価：平均金額 / 平均使用量 を小数点第1位で丸める
-    df_features['実質単価(円/m3)'] = (df_features['平均金額'] / df_features['平均使用量(m3)'].replace(0, 1)).round(1)
-    
-    # 平均使用量も第1位で丸める
-    df_features['平均使用量(m3)'] = df_features['平均使用量(m3)'].round(1)
+        df_features = df_calc.groupby(['料金表番号_u', '料金プラン名']).agg({
+            ' 使用量_u': ['mean', calc_low_ratio],
+            '当月金額': 'mean'
+        }).reset_index()
+        
+        df_features.columns = ['料金表番号', '料金プラン名', '平均使用量(m3)', 'tmp_ratio', '平均金額']
+        df_features['設備利用率'] = ((1 - df_features['tmp_ratio']) * 100).round(1)
+        df_features['実質単価(円/m3)'] = (df_features['平均金額'] / df_features['平均使用量(m3)'].replace(0, 1)).round(1)
+        df_features['平均使用量(m3)'] = df_features['平均使用量(m3)'].round(1)
 
-    # 不要なカラムを削除してマスタと結合
-    df_features = pd.merge(df_features.drop(columns=['tmp_ratio']), base_fees, left_on='料金表番号', right_on='料金表番号_m', how='left')
+        df_features = pd.merge(df_features.drop(columns=['tmp_ratio']), base_fees, left_on='料金表番号', right_on='料金表番号_m', how='left')
 
-    features = ['平均使用量(m3)', '設備利用率', '実質単価(円/m3)']
-    X = df_features[features].fillna(0)
-    scaler = StandardScaler()
-    X_scaled = scaler.fit_transform(X)
-    kmeans = KMeans(n_clusters=min(k, len(df_features)), n_init='auto', random_state=42)
-    df_features['新グループ'] = [chr(65 + i) for i in kmeans.fit_predict(X_scaled)]
-    df_features = df_features.sort_values('新グループ')
+        # AIクラスタリング
+        features = ['平均使用量(m3)', '設備利用率', '実質単価(円/m3)']
+        X = df_features[features].fillna(0)
+        scaler = StandardScaler()
+        X_scaled = scaler.fit_transform(X)
+        kmeans = KMeans(n_clusters=min(k, len(df_features)), n_init='auto', random_state=42)
+        df_features['新グループ'] = [chr(65 + i) for i in kmeans.fit_predict(X_scaled)]
+        df_features = df_features.sort_values('新グループ')
 
-    # メイン表示
-    st.subheader("AI解析（3Dクラスタリング）")
-    fig = px.scatter_3d(df_features, x='平均使用量(m3)', y='設備利用率', z='実質単価(円/m3)',
-                        color='新グループ', hover_name='料金プラン名',
-                        color_discrete_sequence=px.colors.qualitative.Dark24, height=750)
-    fig.update_layout(scene=dict(yaxis_title='設備利用率 (%)'))
-    st.plotly_chart(fig, use_container_width=True)
+        # 描画
+        st.subheader("AI解析（3Dクラスタリング）")
+        fig = px.scatter_3d(df_features, x='平均使用量(m3)', y='設備利用率', z='実質単価(円/m3)',
+                            color='新グループ', hover_name='料金プラン名',
+                            color_discrete_sequence=px.colors.qualitative.Dark24, height=750)
+        fig.update_layout(scene=dict(yaxis_title='設備利用率 (%)'))
+        st.plotly_chart(fig, use_container_width=True)
 
-    st.subheader("AI集約提案")
-    summary = df_features.groupby('新グループ').agg({
-        '料金プラン名': lambda x: ' / '.join(x.astype(str)),
-        '平均使用量(m3)': 'mean', '設備利用率': 'mean', '実質単価(円/m3)': 'mean', '平均金額': 'mean', 'マスタ基本料金': 'mean'
-    }).reset_index()
+        st.subheader("AI集約提案")
+        summary = df_features.groupby('新グループ').agg({
+            '料金プラン名': lambda x: ' / '.join(x.astype(str)),
+            '平均使用量(m3)': 'mean', '設備利用率': 'mean', '実質単価(円/m3)': 'mean', '平均金額': 'mean', 'マスタ基本料金': 'mean'
+        }).reset_index()
 
-    summary['新基本料金案'] = summary['マスタ基本料金'].round(0) # 基本料金は整数
-    # ここで計算後に round(2) を適用して「無限の小数点」を抹殺する
-    summary['新従量単価案'] = ((summary['平均金額'] - summary['新基本料金案']) / summary['平均使用量(m3)'].replace(0, 1)).round(2)
-    
-    # 提案書(disp_summary)の生成
-    disp_summary = summary.drop(columns=['平均金額', 'マスタ基本料金']).rename(columns={'料金プラン名': '統合対象の現行プラン'})
-    
-    # テーブル表示のフォーマットも念のため再徹底
-    st.table(disp_summary.style.format({
-        '平均使用量(m3)': '{:,.1f}', 
-        '設備利用率': '{:,.1f}%', 
-        '実質単価(円/m3)': '{:,.1f}', 
-        '新基本料金案': '{:,.0f}', 
-        '新従量単価案': '{:,.2f}' # 表示上も第2位まで
-    }))
-    
-    # --- 7. サイドバーへのボタン追記 (解析が終わった後に書くのが正解) ---
-    with st.sidebar:
-        st.divider()
-        st.header("📤 解析結果の出力")
-        csv_data = disp_summary.to_csv(index=False, encoding='utf-8-sig')
-        st.download_button(
-            label="📥 提案書(CSV)を出力",
-            data=csv_data,
-            file_name="gasio_ai_proposal.csv",
-            use_container_width=True,
-            key="sidebar_export_btn"
-        )
+        summary['新基本料金案'] = summary['マスタ基本料金'].round(0)
+        summary['新従量単価案'] = ((summary['平均金額'] - summary['新基本料金案']) / summary['平均使用量(m3)'].replace(0, 1)).round(2)
+        disp_summary = summary.drop(columns=['平均金額', 'マスタ基本料金']).rename(columns={'料金プラン名': '統合対象の現行プラン'})
+        
+        st.table(disp_summary.style.format({
+            '平均使用量(m3)': '{:,.1f}', '設備利用率': '{:,.1f}%', '実質単価(円/m3)': '{:,.1f}', 
+            '新基本料金案': '{:,.0f}', '新従量単価案': '{:,.2f}'
+        }))
+        
+        # 7. サイドバーへのボタン追記
+        with st.sidebar:
+            st.divider()
+            st.header("📤 解析結果の出力")
+            csv_data = disp_summary.to_csv(index=False, encoding='utf-8-sig')
+            st.download_button(
+                label="📥 提案書(CSV)を出力",
+                data=csv_data,
+                file_name="gasio_ai_proposal.csv",
+                use_container_width=True,
+                key="sidebar_export_btn"
+            )
 
 except Exception as e:
     st.error(f"解析エラーが発生しました: {e}")
