@@ -84,8 +84,8 @@ with st.sidebar:
     st.divider()
     st.header("📂 データ入力")
     with st.expander("ℹ️ インポートガイダンス"):
-        st.download_button("📥 マスタ見本", get_cluster_sample_csv('master'), "sample_master.csv", "text/csv")
-        st.download_button("📥 実績見本", get_cluster_sample_csv('usage'), "sample_usage.csv", "text/csv")
+        st.download_button("📥 マスタサンプル", get_cluster_sample_csv('master'), "sample_master.csv", "text/csv")
+        st.download_button("📥 使用量サンプル", get_cluster_sample_csv('usage'), "sample_usage.csv", "text/csv")
     file_master = st.file_uploader("① 料金表マスタ(CSV)", type='csv', key="master")
     file_usage = st.file_uploader("② 実績データ(CSV)", type='csv', key="usage")
 
