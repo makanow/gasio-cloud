@@ -67,7 +67,7 @@ with st.sidebar:
 
     # 1. データインポート（ここが一番上）
     st.header("📂 データインポート")
-    with st.expander("CSVファイルを指定", expanded=True):
+    with st.expander("CSVファイルを指定", expanded=False):
         st.subheader("サンプルを取得")
         sample_m, sample_u = get_demo_data()
         st.download_button("📋 料金表マスタ(CSV)", sample_m.to_csv(index=False, encoding='utf-8-sig'), "sample_master.csv", use_container_width=True)
