@@ -66,27 +66,38 @@ with st.sidebar:
     st.caption("AI料金集約エンジン")
     st.divider()
 
-    # --- 1. まずパラメーターを定義（ここを上に移動！） ---
+    # --- 1. パラメーター定義（NameErrorを防ぐため、必ず最初に行う） ---
     st.header("⚙️ 解析パラメーター")
     k = st.slider("統合後の目標グループ数", 2, 10, 4)
     low_usage_threshold = st.slider("設備利用率の閾値 (m3)", 5, 40, 10, step=5)
     st.caption(f"💡 **設備利用率とは**: {low_usage_threshold}m3を超える使用量の割合。")
     st.divider()
 
-    # --- 2. サンプル生成関数 ---
+    # --- 2. サンプル生成関数（中身もしっかり記述） ---
     def get_sample_usage_csv():
-        # (中身は省略)
-        ...
+        df = pd.DataFrame({'料金表番号': [1, 1, 2, 2, 3], '使用量': [12.5, 28.0, 5.0, 45.3, 150.0]})
+        return df.to_csv(index=False).encode('utf-8-sig')
 
     def get_sample_master_csv():
-        # (中身は省略)
-        ...
+        df = pd.DataFrame({
+            '料金表番号': [1, 1, 2, 2, 3, 3],
+            '料金プラン名': ['一般A', '一般A', 'ゆったりB', 'ゆったりB', '工業用C', '工業用C'],
+            '下限': [0, 20.1, 0, 20.1, 0, 50.1], '上限': [20.0, 9999, 20.0, 9999, 50.0, 9999],
+            '基本料金': [1000, 1400, 1500, 1900, 3000, 3500], '従量単価': [250, 235, 200, 185, 150, 135]
+        })
+        return df.to_csv(index=False).encode('utf-8-sig')
     
     # --- 3. データ入力ガイダンス ---
     st.header("📂 データ入力")
     with st.expander("ℹ️ CSVインポートガイダンス", expanded=False):
-        # (中身は省略)
-        ...
+        st.markdown("""
+        **【1. 料金表マスタCSV】**
+        - `料金表番号`, `下限`, `上限`, `基本料金`, `従量単価`
+        **【2. 実績データCSV】**
+        - `料金表番号`, `使用量`
+        """)
+        st.download_button("📥 マスタサンプルCSV", get_sample_master_csv(), "sample_master.csv", "text/csv", use_container_width=True)
+        st.download_button("📥 使用量サンプルCSV", get_sample_usage_csv(), "sample_usage.csv", "text/csv", use_container_width=True)
 
     file_master = st.file_uploader("① 料金表マスタ(CSV)", type='csv')
     file_usage = st.file_uploader("② 実績データ(CSV)", type='csv')
@@ -111,10 +122,9 @@ if file_master and file_usage:
     st.toast("✅ ヘッダー判定完了")
 else:
     df_m_demo, df_u_demo = get_demo_data()
-    # デモデータも内部標準名にリネームして統一
     df_m = df_m_demo.rename(columns={'料金プランID': '料金表番号_m'})
     df_u = df_u_demo.rename(columns={'使用量': '使用量_u', '料金表番号': '料金表番号_u'})
-    st.info(f"💡 デモデータ（現行{df_m['料金表番号_m'].nunique()}プラン）を表示中。")
+    # st.info の部分は元のコードのまま
 
 # --- 解析エンジン本体 ---
 # (読み込み段階でリネーム済みのため、そのままマージへ移行)
