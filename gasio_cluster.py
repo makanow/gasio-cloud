@@ -89,7 +89,7 @@ with st.sidebar:
     
     # --- 3. データ入力ガイダンス ---
     st.header("📂 データ入力")
-    with st.expander("ℹ️ CSVインポートガイダンス", expanded=false):
+    with st.expander("ℹ️ CSVインポートガイダンス", expanded=False):
         st.markdown("""
         **【1. 料金表マスタCSV】**
         - `料金表番号`, `下限`, `上限`, `基本料金`, `従量単価`
