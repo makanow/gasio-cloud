@@ -159,9 +159,13 @@ try:
         summary['新基本料金案'] = summary['マスタ基本料金'].round(0)
         summary['新従量単価案'] = ((summary['平均金額'] - summary['新基本料金案']) / summary['平均使用量(m3)'].replace(0, 1)).round(2)
         disp_summary = summary.drop(columns=['平均金額', 'マスタ基本料金']).rename(columns={'料金プラン名': '統合対象の現行プラン'})
-        st.table(disp_summary.style.format({'平均使用量(m3)': '{:,.1f}', '設備利用率': '{:,.1f}%', '実質単価(円/m3)': '{:,.1f}', '新基本料金案': '{:,.0f}', '新従量単価案': '{:,.2f}'}))
-
-        # --- 9. サイドバー最下部：空枠にボタンを流し込む ---
+        st.table(disp_summary.set_index('新グループ').style.format({
+            '平均使用量(m3)': '{:,.1f}', 
+            '設備利用率': '{:,.1f}%', 
+            '実質単価(円/m3)': '{:,.1f}', 
+            '新基本料金案': '{:,.0f}', 
+            '新従量単価案': '{:,.2f}'
+        }))
         with export_placeholder.container():
             st.divider()
             st.header("📤 解析結果の出力")
