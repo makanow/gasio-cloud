@@ -62,7 +62,7 @@ with st.sidebar:
     st.markdown("""<h1 style='font-size: 2.5rem; margin-bottom: 0;'>
                 <span style='color:#2c3e50'>Gas</span><span style='color:#e74c3c'>i</span><span style='color:#3498db'>o</span> 
                 <span style='color:#2c3e50'>Cluster</span></h1>""", unsafe_allow_html=True)
-    st.caption("AI料金集約エンジン")
+    st.caption("AIセグメント集約エンジン")
     st.divider()
 
     # 1. データインポート（ここが一番上）
