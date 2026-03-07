@@ -96,7 +96,7 @@ with st.sidebar:
         **【2. 実績データCSV】**
         - `料金表番号`, `使用量`
         """)
-        st.download_button("📥 マスタサンプルCSV", get_sample_master_csv(), "sample_master.csv", "text/csv", use_container_width=True)
+        st.download_button("📥 料金表サンプルCSV", get_sample_master_csv(), "sample_master.csv", "text/csv", use_container_width=True)
         st.download_button("📥 使用量サンプルCSV", get_sample_usage_csv(), "sample_usage.csv", "text/csv", use_container_width=True)
 
     file_master = st.file_uploader("① 料金表マスタ(CSV)", type='csv')
