@@ -114,7 +114,7 @@ df_features = df_calc.groupby(['料金表番号_u', '料金プラン名']).agg({
 
 # カラム名の整理と「設備利用率」への変換
 df_features.columns = ['料金表番号', '料金プラン名', '平均使用量(m3)', 'tmp_ratio', '平均金額']
-df_features['設備利用率'] = 1 - df_features['tmp_ratio']  # ナガセの狙い通り反転！
+df_features['設備利用率'] = (1 - df_features['tmp_ratio']) * 100
 df_features['実質単価(円/m3)'] = df_features['平均金額'] / df_features['平均使用量(m3)'].replace(0, 1)
 df_features = pd.merge(df_features, base_fees, left_on='料金表番号', right_on='料金表番号_m', how='left')
 
@@ -145,7 +145,7 @@ fig = px.scatter_3d(
     color_discrete_sequence=px.colors.qualitative.Dark24,
     height=750
 )
-fig.update_layout(margin=dict(l=0, r=0, b=0, t=0))
+fig.update_layout(scene=dict(yaxis_title='設備利用率 (%)'))
 st.plotly_chart(fig, use_container_width=True)
 
 # --- 集計：AI集約提案 ---
@@ -164,8 +164,11 @@ summary['新従量単価案'] = (summary['平均金額'] - summary['新基本料
 disp_summary = summary.drop(columns=['平均金額', 'マスタ基本料金']).rename(columns={'料金プラン名': '統合対象の現行プラン'})
 
 st.table(disp_summary.style.format({
-    '平均使用量(m3)': '{:,.1f}', '実質単価(円/m3)': '{:,.1f}',
-    '新基本料金案': '{:,.0f}', '新従量単価案': '{:,.2f}'
+    '平均使用量(m3)': '{:,.1f}', 
+    '設備利用率': '{:,.1f}%',  # ここを追加
+    '実質単価(円/m3)': '{:,.1f}',
+    '新基本料金案': '{:,.0f}', 
+    '新従量単価案': '{:,.2f}'
 }))
 
 # --- エクスポート ---
