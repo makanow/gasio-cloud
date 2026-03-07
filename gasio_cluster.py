@@ -74,8 +74,8 @@ with st.sidebar:
     with st.expander("📂 データインポート", expanded=False):
         st.subheader("1. サンプルを取得")
         sample_m, sample_u = get_demo_data()
-        st.download_button("📋 料金表マスタ手本 (CSV)", sample_m.to_csv(index=False, encoding='utf-8-sig'), "sample_master.csv", use_container_width=True)
-        st.download_button("📊 実績データ手本 (CSV)", sample_u.to_csv(index=False, encoding='utf-8-sig'), "sample_usage.csv", use_container_width=True)
+        st.download_button("📋 料金表マスタ (CSV)", sample_m.to_csv(index=False, encoding='utf-8-sig'), "sample_master.csv", use_container_width=True)
+        st.download_button("📊 実績データ (CSV)", sample_u.to_csv(index=False, encoding='utf-8-sig'), "sample_usage.csv", use_container_width=True)
         
         st.markdown("---")
         st.subheader("2. アップロード")
