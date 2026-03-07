@@ -57,7 +57,14 @@ def safe_read_csv(file):
         file.seek(0)
         return pd.read_csv(file, encoding='cp932')
 
-# 4. サイドバー構成（設定とインポート）
+# --- 4. データロード（まずデータを確定させる！） ---
+if file_master and file_usage:
+    df_m = safe_read_csv(file_master)
+    df_u = safe_read_csv(file_usage)
+else:
+    df_m, df_u = get_demo_data()
+
+# --- 5. サイドバー構成（確定したデータに基づいて描画） ---
 with st.sidebar:
     st.markdown("""<h1 style='font-size: 2.5rem; margin-bottom: 0;'>
                 <span style='color:#2c3e50'>Gas</span><span style='color:#e74c3c'>i</span><span style='color:#3498db'>o</span> 
@@ -66,27 +73,31 @@ with st.sidebar:
     st.divider()
     
     st.header("⚙️ 解析パラメーター")
-    k = st.slider("統合後の目標グループ数", 2, 10, 4)
+
+    # ここで読み込んだデータのプラン数を計算
+    all_plans = sorted(df_m['料金プラン名'].unique())
+    n_plans = len(all_plans)
+
+    # スライダーの最大値をプラン数（n_plans）に動的に設定！
+    k = st.slider(
+        "統合後の目標グループ数", 
+        min_value=2, 
+        max_value=max(2, n_plans), # プラン数が上限になる
+        value=min(4, n_plans)      # 初期値もプラン数を超えないように調整
+    )
+
     low_usage_threshold = st.slider("設備利用率の閾値 (m3)", 5, 40, 10, step=5)
-    
     st.divider()
 
+    # --- データインポート（ここより下に移動させる） ---
     with st.expander("📂 データインポート", expanded=False):
+        # ... (以下、ファイルアップローダーなどのコードは同じ) ...
         st.subheader("1. サンプルを取得")
-        sample_m, sample_u = get_demo_data()
-        st.download_button("📋 料金表マスタ (CSV)", sample_m.to_csv(index=False, encoding='utf-8-sig'), "sample_master.csv", use_container_width=True)
-        st.download_button("📊 実績データ (CSV)", sample_u.to_csv(index=False, encoding='utf-8-sig'), "sample_usage.csv", use_container_width=True)
-        st.markdown("---")
+        # (略)
         st.subheader("2. アップロード")
-        file_master = st.file_uploader("料金表マスタ(CSV)", type='csv')
-        file_usage = st.file_uploader("実績データ(CSV)", type='csv')
-
-# 5. データロード
-if file_master and file_usage:
-    df_m = safe_read_csv(file_master)
-    df_u = safe_read_csv(file_usage)
-else:
-    df_m, df_u = get_demo_data()
+        # keyを追加して、再描画時にアップロードがリセットされないようガードする
+        file_master = st.file_uploader("料金表マスタ(CSV)", type='csv', key="up_master")
+        file_usage = st.file_uploader("実績データ(CSV)", type='csv', key="up_usage")
 
 # 🔍 解析対象の選択（マルチセレクト）
 with st.sidebar:
