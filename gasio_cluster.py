@@ -7,29 +7,19 @@ import plotly.express as px
 
 st.set_page_config(layout="wide", page_title="Gasio Cluster AI")
 
-# --- デモデータ生成関数（10プラン・高分散版） ---
+# --- デモデータ生成関数 ---
 def get_demo_data():
-    # 10の多様なプラン名称
     plan_names = [
         '一般Aプラン', 'ゆったりBプラン', '暖房Cプラン', '厨房特約D', 
         'エコジョーズE', '店舗用F', '大口工業用G', '福祉割引H',
         '高効率給湯器I', '夏期集中J'
     ]
-    
     master_rows = []
     usage_rows = []
-    
-    np.random.seed(42) # 再現性を確保
-    
+    np.random.seed(42)
     for i, name in enumerate(plan_names):
         plan_id = i + 1
-        
-        # --- 戦略的に分布を散らす ---
-        # 1. 平均使用量を4つのセグメントに分ける
         avg_usage = np.random.choice([12, 28, 55, 150]) 
-        
-        # 2. 基本料金と従量単価に相関を持たせつつノイズを加える
-        # 使用量が多いプランほど基本料金が高く、単価が低い傾向にする
         if avg_usage < 20:
             base_f = np.random.randint(800, 1200)
             unit_p = np.random.randint(220, 260)
@@ -39,20 +29,13 @@ def get_demo_data():
         else:
             base_f = np.random.randint(2000, 3500)
             unit_p = np.random.randint(130, 170)
-        
-        # 料金表マスタ：2区画生成
         master_rows.append([plan_id, name, 0, 20.0, base_f, unit_p])
         master_rows.append([plan_id, name, 20.1, 9999, base_f + 400, unit_p - 15])
-        
-        # 実績データ：1プランあたり25レコード（計250データ）
-        # 分散(std)を大きめにしてプロットを散らす
         samples = np.random.normal(avg_usage, avg_usage * 0.4, 25).clip(1, 400)
         for val in samples:
             usage_rows.append([plan_id, val])
-
     df_m = pd.DataFrame(master_rows, columns=['料金プランID', '料金プラン名', '下限', '上限', '基本料金', '従量単価'])
     df_u = pd.DataFrame(usage_rows, columns=['料金表番号', '使用量'])
-    
     return df_m, df_u
 
 # --- サイドバー構成 ---
@@ -66,17 +49,22 @@ with st.sidebar:
     st.caption("AI料金集約エンジン")
     st.divider()
     
+    # 1. 解析パラメーターを上に移動
+    st.header("⚙️ 解析パラメーター")
+    k = st.slider("統合後の目標グループ数", 2, 10, 4)
+    low_usage_threshold = st.slider("設備利用率の閾値 (m3)", 5, 40, 10, step=5)
+    st.caption(f"💡 **設備利用率とは**: {low_usage_threshold}m3を超える使用量の割合。")
+
+    st.divider()
+
+    # 2. データ入力を下に移動
     st.header("📂 データ入力")
     file_master = st.file_uploader("① 料金表マスタ(CSV)", type='csv')
     file_usage = st.file_uploader("② 実績データ(CSV)", type='csv')
     
-    st.divider()
-    st.header("⚙️ 解析パラメーター")
-    # 10プランあるのでkの最大値を10に
-    k = st.slider("統合後の目標グループ数", 2, 10, 4)
-    low_usage_threshold = st.slider("設備利用率の閾値 (m3)", 5, 40, 10, step=5)
-
-    st.caption(f"💡 **設備利用率とは**: {low_usage_threshold}m3を超える使用量の割合。数値が高いほど、供給設備の稼働率が高い。")
+    # アップロードがない場合の挙動を明示
+    if not (file_master and file_usage):
+        st.info("👆 ファイルをアップロードしない場合は、自動的にデモデータで解析を実行します。")
 
 # --- データ読み込みロジック ---
 if file_master and file_usage:
@@ -85,20 +73,15 @@ if file_master and file_usage:
     st.toast("✅ アップロードデータを解析中...")
 else:
     df_m, df_u = get_demo_data()
-    st.info(f"💡 デモデータ（現行{df_m['料金プランID'].nunique()}プラン）を表示中。")
 
-# --- 解析エンジン本体（ここから修正） ---
-# ここは「if/else」の外側で、df_m, df_u が確実に存在する状態で実行する
+# --- 解析エンジン本体 ---
 df_u_proc = df_u.rename(columns={'使用量': '使用量_u', '料金表番号': '料金表番号_u'})
 df_m_proc = df_m.rename(columns={'料金プランID': '料金表番号_m'})
 
 merged = pd.merge(df_u_proc, df_m_proc, left_on='料金表番号_u', right_on='料金表番号_m', how='left')
-
-# df_calc をここで確実に定義する
 df_calc = merged[(merged['使用量_u'] >= merged['下限'].astype(float)) & (merged['使用量_u'] <= merged['上限'].astype(float))].copy()
 df_calc['当月金額'] = df_calc['基本料金'] + (df_calc['使用量_u'] * df_calc['従量単価'])
 
-# 基本料金の取得
 base_fees = df_m_proc.sort_values(['料金表番号_m', '下限']).groupby('料金表番号_m').head(1)[['料金表番号_m', '基本料金']]
 base_fees.columns = ['料金表番号_m', 'マスタ基本料金']
 
@@ -106,20 +89,18 @@ def calc_low_ratio(x):
     active = (x > 0).sum()
     return ((x > 0) & (x <= low_usage_threshold)).sum() / active if active > 0 else 0
 
-# 集計処理
 df_features = df_calc.groupby(['料金表番号_u', '料金プラン名']).agg({
     '使用量_u': ['mean', calc_low_ratio],
     '当月金額': 'mean'
 }).reset_index()
 
-# カラム名の整理と「設備利用率」への変換
 df_features.columns = ['料金表番号', '料金プラン名', '平均使用量(m3)', 'tmp_ratio', '平均金額']
 df_features['設備利用率'] = (1 - df_features['tmp_ratio']) * 100
 df_features['実質単価(円/m3)'] = df_features['平均金額'] / df_features['平均使用量(m3)'].replace(0, 1)
 df_features = pd.merge(df_features, base_fees, left_on='料金表番号', right_on='料金表番号_m', how='left')
 
 # --- AIクラスタリング ---
-features = ['平均使用量(m3)', '設備利用率', '実質単価(円/m3)'] # 軸を変更
+features = ['平均使用量(m3)', '設備利用率', '実質単価(円/m3)']
 X = df_features[features].fillna(0)
 scaler = StandardScaler()
 X_scaled = scaler.fit_transform(X)
@@ -130,29 +111,27 @@ cluster_labels = kmeans.fit_predict(X_scaled)
 df_features['新グループ'] = [chr(65 + i) for i in cluster_labels]
 df_features = df_features.sort_values('新グループ')
 
-# --- 可視化：3Dマップ ---
+# --- メイン画面：可視化 ---
 st.subheader("AI解析（3Dクラスタリング）")
-sorted_groups = sorted(df_features['新グループ'].unique())
-
 fig = px.scatter_3d(
     df_features, 
     x='平均使用量(m3)', 
-    y='設備利用率', # 軸名を変更
+    y='設備利用率', 
     z='実質単価(円/m3)',
     color='新グループ', 
     hover_name='料金プラン名',
-    category_orders={"新グループ": sorted_groups},
     color_discrete_sequence=px.colors.qualitative.Dark24,
     height=750
 )
 fig.update_layout(scene=dict(yaxis_title='設備利用率 (%)'))
 st.plotly_chart(fig, use_container_width=True)
 
-# --- 集計：AI集約提案 ---
+# --- メイン画面：AI集約提案 ---
 st.subheader("AI集約提案")
 summary = df_features.groupby('新グループ').agg({
     '料金プラン名': lambda x: ' / '.join(x.astype(str)),
     '平均使用量(m3)': 'mean',
+    '設備利用率': 'mean',
     '実質単価(円/m3)': 'mean',
     '平均金額': 'mean',
     'マスタ基本料金': 'mean'
@@ -165,13 +144,13 @@ disp_summary = summary.drop(columns=['平均金額', 'マスタ基本料金']).r
 
 st.table(disp_summary.style.format({
     '平均使用量(m3)': '{:,.1f}', 
-    '設備利用率': '{:,.1f}%',  # ここを追加
+    '設備利用率': '{:,.1f}%',
     '実質単価(円/m3)': '{:,.1f}',
     '新基本料金案': '{:,.0f}', 
     '新従量単価案': '{:,.2f}'
 }))
 
-# --- エクスポート ---
+# --- サイドバー：エクスポート ---
 with st.sidebar:
     st.divider()
     csv_data = disp_summary.to_csv(index=False, encoding='utf-8-sig')
