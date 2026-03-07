@@ -85,18 +85,7 @@ else:
     df_m, df_u = get_demo_data()
     st.info(f"💡 デモデータ（現行{df_m['料金プランID'].nunique()}プラン）を表示中。")
 
-# --- 解析エンジン本体 ---
-df_u = df_u.rename(columns={'使用量': '使用量_u', '料金表番号': '料金表番号_u'})
-df_m = df_m.rename(columns={'料金プランID': '料金表番号_m'})
-
-merged = pd.merge(df_u, df_m, left_on='料金表番号_u', right_on='料金表番号_m', how='left')
-# 数値型に強制変換してエラー回避
-df_calc = merged[(merged['使用量_u'] >= merged['下限'].astype(float)) & (merged['使用量_u'] <= merged['上限'].astype(float))].copy()
-df_calc['当月金額'] = df_calc['基本料金'] + (df_calc['使用量_u'] * df_calc['従量単価'])
-
-base_fees = df_m.sort_values(['料金表番号_m', '下限']).groupby('料金表番号_m').head(1)[['料金表番号_m', '基本料金']]
-base_fees.columns = ['料金表番号_m', 'マスタ基本料金']
-
+# --- 解析エンジン本体（修正版） ---
 def calc_low_ratio(x):
     active = (x > 0).sum()
     return ((x > 0) & (x <= low_usage_threshold)).sum() / active if active > 0 else 0
@@ -106,12 +95,14 @@ df_features = df_calc.groupby(['料金表番号_u', '料金プラン名']).agg({
     '当月金額': 'mean'
 }).reset_index()
 
-df_features.columns = ['料金表番号', '料金プラン名', '平均使用量(m3)', '低使用量層の割合', '平均金額']
+# カラム名を整理し「設備利用率」に変換
+df_features.columns = ['料金表番号', '料金プラン名', '平均使用量(m3)', 'tmp_ratio', '平均金額']
+df_features['設備利用率'] = 1 - df_features['tmp_ratio'] # ここで反転
 df_features['実質単価(円/m3)'] = df_features['平均金額'] / df_features['平均使用量(m3)'].replace(0, 1)
 df_features = pd.merge(df_features, base_fees, left_on='料金表番号', right_on='料金表番号_m', how='left')
 
 # --- AIクラスタリング ---
-features = ['平均使用量(m3)', '低使用量層の割合', '実質単価(円/m3)']
+features = ['平均使用量(m3)', '設備利用率', '実質単価(円/m3)'] # 軸を変更
 X = df_features[features].fillna(0)
 scaler = StandardScaler()
 X_scaled = scaler.fit_transform(X)
@@ -127,11 +118,14 @@ st.subheader("AI解析（3Dクラスタリング）")
 sorted_groups = sorted(df_features['新グループ'].unique())
 
 fig = px.scatter_3d(
-    df_features, x='平均使用量(m3)', y='低使用量層の割合', z='実質単価(円/m3)',
+    df_features, 
+    x='平均使用量(m3)', 
+    y='設備利用率', # 軸名を変更
+    z='実質単価(円/m3)',
     color='新グループ', 
     hover_name='料金プラン名',
     category_orders={"新グループ": sorted_groups},
-    color_discrete_sequence=px.colors.qualitative.Dark24, # より明確な色分け
+    color_discrete_sequence=px.colors.qualitative.Dark24,
     height=750
 )
 fig.update_layout(margin=dict(l=0, r=0, b=0, t=0))
