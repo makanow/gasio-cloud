@@ -177,44 +177,27 @@ def get_tier_name(usage, tariff_df):
 # 3. サイドバー & データロード
 # ---------------------------------------------------------
 with st.sidebar:
-    st.markdown("""<h1 style="font-size: 2.5rem; margin-bottom: 0;"><span style="color:#2c3e50">Gas</span><span style="color:#e74c3c">i</span><span style="color:#3498db">o</span> <span style="color:#2c3e50">Cluster</span></h1>""", unsafe_allow_html=True)
-    st.caption("AI料金集約エンジン")
-    st.divider()
-    
-    # 1. パラメーター
-    st.header("⚙️ 解析パラメーター")
-    k = st.slider("統合後の目標グループ数", 2, 10, 4)
-    low_usage_threshold = st.slider("設備利用率の閾値 (m3)", 5, 40, 10, step=5)
-    st.caption(f"💡 **設備利用率とは**: {low_usage_threshold}m3を超える使用量の割合。")
-    
-    st.divider()
-
-    # 2. アウトプットボタンの空き地
-    st.header("📤 アウトプット")
-    export_container = st.empty() 
-    
-    st.divider()
-
-    # 3. データ入力（ガイダンスをGasio計算機と統一）
     st.header("📂 Data Import")
+    
     with st.expander("ℹ️ CSVインポートガイダンス", expanded=False):
         st.markdown("""
-        **【1. 料金表マスタCSV】**
-        - `料金プランID`: 解析のキーとなる数値
-        - `料金プラン名`: 識別用の名称
-        - `下限`, `上限`: 各区画の適用範囲
-        - `基本料金`, `従量単価`: 各区画の現行料金設定
+        **【1. 使用量CSV】**
+        - `料金表番号` (任意): マスタと照合するキー
+        - `使用量`: 月間のガス使用量
+        ※調定数・取り付け数は不要です。自動で除外されます。
         
-        **【2. 実績データCSV】**
-        - `料金表番号`: マスタのIDと照合するキー
-        - `使用量`: 顧客ごとのガス使用量実績
+        **【2. 料金表マスタCSV】**
+        - `料金表番号` (任意)
+        - `MIN`, `MAX`: 各区画の適用範囲
+        - `基本料金`, `単位料金`: 各区画の料金設定
         """)
-        st.download_button("📥 マスタサンプルCSV", get_cluster_sample_csv('master'), "sample_master.csv", "text/csv")
-        st.download_button("📥 実績サンプルCSV", get_cluster_sample_csv('usage'), "sample_usage.csv", "text/csv")
+        st.download_button("📥 使用量サンプルCSV", get_sample_usage_csv(), "sample_usage.csv", "text/csv")
+        st.download_button("📥 マスタサンプルCSV", get_sample_master_csv(), "sample_master.csv", "text/csv")
 
     st.markdown("---")
-    file_master = st.file_uploader("1. 料金表マスタCSV", type=['csv'], key="m")
-    file_usage = st.file_uploader("2. 実績データCSV", type=['csv'], key="u")
+    file_usage = st.file_uploader("1. 使用量CSV", type=['csv'], key="u")
+    file_master = st.file_uploader("2. 料金表マスタCSV", type=['csv'], key="m")
+    
     # 🌟 データ読み込みとデモモードの判定
     df_master_all = None
     df_usage = None
