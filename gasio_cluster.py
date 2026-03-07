@@ -78,9 +78,8 @@ with st.sidebar:
 
     st.caption(f"💡 **設備利用率とは**: {low_usage_threshold}m3を超える使用量の割合。数値が高いほど、供給設備の稼働率が高い。")
 
-# --- データ読み込みロジック（ヘッダー判定方式へアップグレード） ---
+# --- データ読み込みロジック ---
 if file_master and file_usage:
-    # 料金表マスタの読み込みと列名変換
     df_m_raw = pd.read_csv(file_master)
     m_rename_map = {
         '料金プランID': '料金表番号_m', '料金表番号': '料金表番号_m', 'ID': '料金表番号_m',
@@ -90,17 +89,16 @@ if file_master and file_usage:
     }
     df_m = df_m_raw.rename(columns=m_rename_map)
     
-    # 実績データの読み込みと列名変換
     df_u_raw = pd.read_csv(file_usage)
     u_rename_map = {
         '料金表番号': '料金表番号_u', '料金表ID': '料金表番号_u', 'ID': '料金表番号_u',
         '使用量': '使用量_u', 'Volume': '使用量_u'
     }
     df_u = df_u_raw.rename(columns=u_rename_map)
-    st.toast("✅ ヘッダー判定によるデータ解析を完了しました")
+    st.toast("✅ ヘッダー判定完了")
 else:
-    # デモデータの場合も、後続の処理と整合性を取るためカラム名を合わせる
     df_m_demo, df_u_demo = get_demo_data()
+    # デモデータも内部標準名にリネームして統一
     df_m = df_m_demo.rename(columns={'料金プランID': '料金表番号_m'})
     df_u = df_u_demo.rename(columns={'使用量': '使用量_u', '料金表番号': '料金表番号_u'})
     st.info(f"💡 デモデータ（現行{df_m['料金表番号_m'].nunique()}プラン）を表示中。")
@@ -113,8 +111,8 @@ merged = pd.merge(df_u, df_m, left_on='料金表番号_u', right_on='料金表�
 df_calc = merged[(merged['使用量_u'] >= merged['下限'].astype(float)) & (merged['使用量_u'] <= merged['上限'].astype(float))].copy()
 df_calc['当月金額'] = df_calc['基本料金'] + (df_calc['使用量_u'] * df_calc['従量単価'])
 
-# 基本料金の取得
-base_fees = df_m_proc.sort_values(['料金表番号_m', '下限']).groupby('料金表番号_m').head(1)[['料金表番号_m', '基本料金']]
+# 基本料金の取得（df_m を使用するように修正）
+base_fees = df_m.sort_values(['料金表番号_m', '下限']).groupby('料金表番号_m').head(1)[['料金表番号_m', '基本料金']]
 base_fees.columns = ['料金表番号_m', 'マスタ基本料金']
 
 def calc_low_ratio(x):
