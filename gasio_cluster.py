@@ -57,7 +57,7 @@ def safe_read_csv(file):
         file.seek(0)
         return pd.read_csv(file, encoding='cp932')
 
-# 4. サイドバー
+# --- サイドバー構成 ---
 with st.sidebar:
     st.markdown("""<h1 style='font-size: 2.5rem; margin-bottom: 0;'>
                 <span style='color:#2c3e50'>Gas</span><span style='color:#e74c3c'>i</span><span style='color:#3498db'>o</span> 
@@ -65,23 +65,52 @@ with st.sidebar:
     st.caption("AI料金集約エンジン")
     st.divider()
     
+    # 解析パラメーター
     st.header("⚙️ 解析パラメーター")
     k = st.slider("統合後の目標グループ数", 2, 10, 4)
     low_usage_threshold = st.slider("設備利用率の閾値 (m3)", 5, 40, 10, step=5)
     
     st.divider()
 
+    # データインポート（折りたたみ）
     with st.expander("📂 データインポート", expanded=False):
         st.subheader("1. サンプルを取得")
         sample_m, sample_u = get_demo_data()
-        st.download_button("📋 料金表マスタ手本 (CSV)", sample_m.to_csv(index=False, encoding='utf-8-sig'), "sample_master.csv", use_container_width=True)
-        st.download_button("📊 実績データ手本 (CSV)", sample_u.to_csv(index=False, encoding='utf-8-sig'), "sample_usage.csv", use_container_width=True)
+        st.download_button(
+            "📋 料金表マスタ手本 (CSV)", 
+            sample_m.to_csv(index=False, encoding='utf-8-sig'), 
+            "sample_master.csv", 
+            use_container_width=True
+        )
+        st.download_button(
+            "📊 実績データ手本 (CSV)", 
+            sample_u.to_csv(index=False, encoding='utf-8-sig'), 
+            "sample_usage.csv", 
+            use_container_width=True
+        )
         
         st.markdown("---")
         st.subheader("2. アップロード")
         file_master = st.file_uploader("料金表マスタ(CSV)", type='csv')
         file_usage = st.file_uploader("実績データ(CSV)", type='csv')
 
+    # 解析実行後のエクスポートボタン表示エリア
+    # メイン処理側で disp_summary が作成された後にここが再描画される
+    if 'disp_summary' in locals() or 'disp_summary' in globals():
+        st.divider()
+        st.header("📤 解析結果の出力")
+        csv_data = disp_summary.to_csv(index=False, encoding='utf-8-sig')
+        st.download_button(
+            label="📥 提案書(CSV)を出力",
+            data=csv_data,
+            file_name="gasio_ai_proposal.csv",
+            use_container_width=True,
+            key="export_button_sidebar"
+        )
+    else:
+        # 解析前、あるいはデータ未ロード時のガイド
+        if not (file_master and file_usage):
+            st.info("💡 デモデータでシミュレーション中。自社データの解析には上記からアップロードしてください。")
 # 5. データロードの確定
 if file_master and file_usage:
     df_m = safe_read_csv(file_master)
