@@ -7,6 +7,43 @@ import plotly.express as px
 
 st.set_page_config(layout="wide", page_title="Gasio Cluster AI")
 
+import io # ← これを忘れないよう追加
+
+# --- 新しく追加する関数 ---
+def get_cluster_sample_csv(type='master'):
+    """サンプルデータを生成する（計算機と同じ仕組み）"""
+    if type == 'master':
+        df = pd.DataFrame({
+            '料金プランID': [1, 1, 2, 2],
+            '料金プラン名': ['一般A', '一般A', '暖房B', '暖房B'],
+            '下限': [0, 20.1, 0, 30.1],
+            '上限': [20.0, 9999, 30.0, 9999],
+            '基本料金': [1000, 1400, 2000, 2500],
+            '従量単価': [250, 230, 180, 160]
+        })
+    else:
+        df = pd.DataFrame({
+            '料金表番号': [1, 1, 2, 2, 1],
+            '使用量': [15.5, 22.0, 45.0, 12.0, 8.5]
+        })
+    csv_buffer = io.StringIO()
+    df.to_csv(csv_buffer, index=False, encoding='utf-8-sig')
+    return csv_buffer.getvalue()
+
+def load_clean_csv(file):
+    """BOM削除と数値クレンジング（計算機のロジック）"""
+    try:
+        df = pd.read_csv(file, encoding='utf-8-sig')
+        # 文字列として読み込まれた数値のカンマ等を除去
+        for col in df.columns:
+            if df[col].dtype == 'object':
+                df[col] = df[col].astype(str).str.replace(',', '', regex=False).str.replace('¥', '', regex=False)
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+        return df.dropna(how='all') # 全空行のみ削除
+    except Exception as e:
+        st.error(f"読み込みエラー: {e}")
+        return None
+
 # --- デモデータ生成関数（10プラン・高分散版） ---
 def get_demo_data():
     # 10の多様なプラン名称
@@ -66,9 +103,18 @@ with st.sidebar:
     st.caption("AI料金集約エンジン")
     st.divider()
     
+# ここが st.sidebar の中（半角スペース4つ分下がった状態）であることを確認
     st.header("📂 データ入力")
-    file_master = st.file_uploader("① 料金表マスタ(CSV)", type='csv')
-    file_usage = st.file_uploader("② 実績データ(CSV)", type='csv')
+    
+    # さらに4つ分下げて、expanderを配置する
+    with st.expander("ℹ️ インポートガイダンス"):
+        st.caption("Excelから保存したCSVをそのまま使えます。")
+        st.download_button("📥 マスタ見本", get_cluster_sample_csv('master'), "sample_master.csv", "text/csv")
+        st.download_button("📥 実績見本", get_cluster_sample_csv('usage'), "sample_usage.csv", "text/csv")
+
+    # file_uploaderも expander と同じ縦のラインに揃える
+    file_master = st.file_uploader("① 料金表マスタ(CSV)", type='csv', key="master")
+    file_usage = st.file_uploader("② 実績データ(CSV)", type='csv', key="usage")
     
     st.divider()
     st.header("⚙️ 解析パラメーター")
@@ -80,11 +126,19 @@ with st.sidebar:
 
 # --- データ読み込みロジック ---
 if file_master and file_usage:
-    df_m = pd.read_csv(file_master)
-    df_u = pd.read_csv(file_usage)
-    st.toast("✅ アップロードデータを解析中...")
+    # 自作のクリーン関数を通して読み込む
+    df_m = load_clean_csv(file_master)
+    df_u = load_clean_csv(file_usage)
+    
+    if df_m is not None and df_u is not None:
+        st.toast("✅ クレンジング完了。AI解析を開始します...")
+    else:
+        st.error("データの読み込みに失敗しました。形式を確認してください。")
+        st.stop()
 else:
     df_m, df_u = get_demo_data()
+    # デモデータの場合、料金プランIDを確実に数値にする
+    df_m['料金プランID'] = df_m['料金プランID'].astype(int)
     st.info(f"💡 デモデータ（現行{df_m['料金プランID'].nunique()}プラン）を表示中。")
 
 # --- 解析エンジン本体（ここから修正） ---
