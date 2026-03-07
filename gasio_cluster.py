@@ -88,7 +88,7 @@ if file_master and file_usage:
 else:
     df_m, df_u = get_demo_data()
 
-# --- 追加機能：プラン選択フィルタ ---
+# 🔍 解析対象の選択（マルチセレクト）
 with st.sidebar:
     st.divider()
     st.header("🔍 解析対象の選択")
@@ -96,8 +96,7 @@ with st.sidebar:
     selected_plans = st.multiselect(
         "解析に含めるプランを選択", 
         options=all_plans, 
-        default=all_plans,
-        help="チェックを外したプランはクラスタリング計算から除外されます。"
+        default=all_plans
     )
 
 # 6. 解析ロジック本体
@@ -105,14 +104,12 @@ try:
     if not selected_plans:
         st.warning("⚠️ 解析対象のプランを1つ以上選択してください。")
     else:
-        # フィルタリング実行
+        # フィルタリング
         df_m_filtered = df_m[df_m['料金プラン名'].isin(selected_plans)]
-        
-        # 処理開始
         df_u_proc = df_u.rename(columns={'使用量': '使用量_u', '料金表番号': '料金表番号_u'})
         df_m_proc = df_m_filtered.rename(columns={'料金プランID': '料金表番号_m'})
         
-        # フィルタ後のマスタに存在するデータのみをマージ
+        # 内部結合で対象データのみに絞る
         merged = pd.merge(df_u_proc, df_m_proc, left_on='料金表番号_u', right_on='料金表番号_m', how='inner')
         
         df_calc = merged[(merged['使用量_u'] >= merged['下限'].astype(float)) & (merged['使用量_u'] <= merged['上限'].astype(float))].copy()
@@ -125,12 +122,15 @@ try:
             active = (x > 0).sum()
             return ((x > 0) & (x <= low_usage_threshold)).sum() / active if active > 0 else 0
 
+        # 指標の計算
         df_features = df_calc.groupby(['料金表番号_u', '料金プラン名']).agg({
-            ' 使用量_u': ['mean', calc_low_ratio],
+            '使用量_u': ['mean', calc_low_ratio], # ここから余計なスペースを削除済み
             '当月金額': 'mean'
         }).reset_index()
         
         df_features.columns = ['料金表番号', '料金プラン名', '平均使用量(m3)', 'tmp_ratio', '平均金額']
+        
+        # 数値の丸め処理を一括適用
         df_features['設備利用率'] = ((1 - df_features['tmp_ratio']) * 100).round(1)
         df_features['実質単価(円/m3)'] = (df_features['平均金額'] / df_features['平均使用量(m3)'].replace(0, 1)).round(1)
         df_features['平均使用量(m3)'] = df_features['平均使用量(m3)'].round(1)
@@ -146,7 +146,7 @@ try:
         df_features['新グループ'] = [chr(65 + i) for i in kmeans.fit_predict(X_scaled)]
         df_features = df_features.sort_values('新グループ')
 
-        # 描画
+        # メイン表示
         st.subheader("AI解析（3Dクラスタリング）")
         fig = px.scatter_3d(df_features, x='平均使用量(m3)', y='設備利用率', z='実質単価(円/m3)',
                             color='新グループ', hover_name='料金プラン名',
@@ -162,6 +162,8 @@ try:
 
         summary['新基本料金案'] = summary['マスタ基本料金'].round(0)
         summary['新従量単価案'] = ((summary['平均金額'] - summary['新基本料金案']) / summary['平均使用量(m3)'].replace(0, 1)).round(2)
+        
+        # 小数点以下を整形した提案書データの確定
         disp_summary = summary.drop(columns=['平均金額', 'マスタ基本料金']).rename(columns={'料金プラン名': '統合対象の現行プラン'})
         
         st.table(disp_summary.style.format({
@@ -169,7 +171,7 @@ try:
             '新基本料金案': '{:,.0f}', '新従量単価案': '{:,.2f}'
         }))
         
-        # 7. サイドバーへのボタン追記
+        # 7. サイドバーへのボタン追記（この位置が確実）
         with st.sidebar:
             st.divider()
             st.header("📤 解析結果の出力")
@@ -179,7 +181,7 @@ try:
                 data=csv_data,
                 file_name="gasio_ai_proposal.csv",
                 use_container_width=True,
-                key="sidebar_export_btn"
+                key="sidebar_export_btn_v3"
             )
 
 except Exception as e:
