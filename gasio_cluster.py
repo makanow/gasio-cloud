@@ -76,6 +76,8 @@ with st.sidebar:
     k = st.slider("統合後の目標グループ数", 2, 10, 4)
     low_usage_threshold = st.slider("設備利用率の閾値 (m3)", 5, 40, 10, step=5)
 
+    st.caption(f"💡 **設備利用率とは**: {low_usage_threshold}m3を超える使用量の割合。数値が高いほど、供給設備の稼働率が高い。")
+
 # --- データ読み込みロジック ---
 if file_master and file_usage:
     df_m = pd.read_csv(file_master)
