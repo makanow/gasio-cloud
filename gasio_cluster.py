@@ -74,7 +74,7 @@ with st.sidebar:
     st.header("⚙️ 解析パラメーター")
     # 10プランあるのでkの最大値を10に
     k = st.slider("統合後の目標グループ数", 2, 10, 4)
-    low_usage_threshold = st.slider("低使用量層の定義 (m3)", 5, 40, 10, step=5)
+    low_usage_threshold = st.slider("設備利用率の閾値 (m3)", 5, 40, 10, step=5)
 
 # --- データ読み込みロジック ---
 if file_master and file_usage:
