@@ -21,7 +21,7 @@ def get_demo_data():
         unit_p = np.random.randint(130, 260)
         master_rows.append([plan_id, name, 0, 20.0, base_f, unit_p])
         master_rows.append([plan_id, name, 20.1, 9999, base_f + 400, unit_p - 15])
-        samples = np.random.normal(avg_usage, avg_usage * 0.4, 25).clip(1, 400)
+        samples = np.random.normal(avg_usage, avg_usage * 0.4, 25).clip(1, 400).round(1)
         for val in samples:
             usage_rows.append([plan_id, val])
     
