@@ -103,14 +103,16 @@ with st.sidebar:
     st.caption("AI料金集約エンジン")
     st.divider()
     
-st.header("📂 データ入力")
+# ここが st.sidebar の中（半角スペース4つ分下がった状態）であることを確認
+    st.header("📂 データ入力")
     
-    # 計算機と同じガイダンスを追加
+    # さらに4つ分下げて、expanderを配置する
     with st.expander("ℹ️ インポートガイダンス"):
         st.caption("Excelから保存したCSVをそのまま使えます。")
         st.download_button("📥 マスタ見本", get_cluster_sample_csv('master'), "sample_master.csv", "text/csv")
         st.download_button("📥 実績見本", get_cluster_sample_csv('usage'), "sample_usage.csv", "text/csv")
 
+    # file_uploaderも expander と同じ縦のラインに揃える
     file_master = st.file_uploader("① 料金表マスタ(CSV)", type='csv', key="master")
     file_usage = st.file_uploader("② 実績データ(CSV)", type='csv', key="usage")
     
