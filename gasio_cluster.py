@@ -81,19 +81,6 @@ with st.sidebar:
         st.subheader("2. アップロード")
         file_master = st.file_uploader("料金表マスタ(CSV)", type='csv')
         file_usage = st.file_uploader("実績データ(CSV)", type='csv')
-        
-        # --- サイドバーの最下部にエクスポートボタンを再配置 ---
-    st.divider()
-    # disp_summary が定義されている（解析が成功している）場合のみ表示
-    if 'disp_summary' in locals():
-        csv_data = disp_summary.to_csv(index=False, encoding='utf-8-sig')
-        st.download_button(
-            label="📥 提案書(CSV)を出力",
-            data=csv_data,
-            file_name="gasio_ai_proposal.csv",
-            use_container_width=True,
-            key="export_button" # キーを固定して安定させる
-        )
 
 # 5. データロードの確定
 if file_master and file_usage:
