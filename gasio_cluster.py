@@ -136,11 +136,23 @@ try:
         '料金プラン名': lambda x: ' / '.join(x.astype(str)),
         '平均使用量(m3)': 'mean', '設備利用率': 'mean', '実質単価(円/m3)': 'mean', '平均金額': 'mean', 'マスタ基本料金': 'mean'
     }).reset_index()
-    summary['新基本料金案'] = summary['マスタ基本料金']
-    summary['新従量単価案'] = (summary['平均金額'] - summary['新基本料金案']) / summary['平均使用量(m3)'].replace(0, 1)
-    disp_summary = summary.drop(columns=['平均金額', 'マスタ基本料金']).rename(columns={'料金プラン名': '統合対象の現行プラン'})
-    st.table(disp_summary.style.format({'平均使用量(m3)': '{:,.1f}', '設備利用率': '{:,.1f}%', '実質単価(円/m3)': '{:,.1f}', '新基本料金案': '{:,.0f}', '新従量単価案': '{:,.2f}'}))
 
+    summary['新基本料金案'] = summary['マスタ基本料金'].round(0) # 基本料金は整数
+    # ここで計算後に round(2) を適用して「無限の小数点」を抹殺する
+    summary['新従量単価案'] = ((summary['平均金額'] - summary['新基本料金案']) / summary['平均使用量(m3)'].replace(0, 1)).round(2)
+    
+    # 提案書(disp_summary)の生成
+    disp_summary = summary.drop(columns=['平均金額', 'マスタ基本料金']).rename(columns={'料金プラン名': '統合対象の現行プラン'})
+    
+    # テーブル表示のフォーマットも念のため再徹底
+    st.table(disp_summary.style.format({
+        '平均使用量(m3)': '{:,.1f}', 
+        '設備利用率': '{:,.1f}%', 
+        '実質単価(円/m3)': '{:,.1f}', 
+        '新基本料金案': '{:,.0f}', 
+        '新従量単価案': '{:,.2f}' # 表示上も第2位まで
+    }))
+    
     # --- 7. サイドバーへのボタン追記 (解析が終わった後に書くのが正解) ---
     with st.sidebar:
         st.divider()
