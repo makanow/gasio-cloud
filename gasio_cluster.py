@@ -149,62 +149,15 @@ try:
 
         # 描画：グラフ
         st.subheader("AI解析（3Dクラスタリング）")
-        
-        fig = px.scatter_3d(
-            df_features, 
-            x='平均使用量(m3)', 
-            y='実質単価(円/m3)',  # 奥行き
-            z='設備利用率',       # 高さ
-            color='新グループ', 
-            hover_name='料金プラン名', 
-            height=750
-        )
-
-        # 画像のスケールと向きを再現するための調整
-        fig.update_layout(
-            scene=dict(
-                xaxis=dict(title='使用量 (m3)'),
-                yaxis=dict(
-                    title='平均単価 (円)',
-                    autorange='reversed'  # ← 画像の通り、単価の軸を反転させて手前を高くする
-                ),
-                zaxis=dict(title='設備利用率 (%)'),
-                aspectmode='manual',
-                aspectratio=dict(x=1, y=1, z=0.8) # 高さを少し抑えて見やすく
-            )
-        )
-        
+        fig = px.scatter_3d(df_features, x='平均使用量(m3)', y='設備利用率', z='実質単価(円/m3)', color='新グループ', hover_name='料金プラン名', height=750)
         st.plotly_chart(fig, use_container_width=True)
 
-    # 描画：グラフ
-        st.subheader("AI解析（3Dクラスタリング）")
-        
-        # 軸の割り当てを画像のスケッチ通りに再定義
-        fig = px.scatter_3d(
-            df_features, 
-            x='平均使用量(m3)',   # 横軸
-            y='実質単価(円/m3)',  # 奥行軸
-            z='設備利用率',       # 垂直（高さ）軸
-            color='新グループ', 
-            hover_name='料金プラン名', 
-            height=750
-        )
-
-        fig.update_layout(
-            scene=dict(
-                # 画像の指示：数値が左や手前に向かって大きくなっている可能性を考慮
-                xaxis=dict(title='使用量 (m3)', autorange='reversed'),
-                yaxis=dict(title='平均単価 (円)', autorange='reversed'),
-                zaxis=dict(title='設備利用率 (%)'),
-                # 重要：カメラアングルを画像のパース（斜め俯瞰）に強制固定
-                camera=dict(
-                    eye=dict(x=-1.5, y=-1.5, z=1.2) # 反転させた軸を「正面」から捉える設定
-                ),
-                aspectmode='manual',
-                aspectratio=dict(x=1, y=1, z=0.7)
-            )
-        )
-        st.plotly_chart(fig, use_container_width=True)
+        # 描画：提案テーブル
+        st.subheader("AI集約提案")
+        summary = df_features.groupby('新グループ').agg({'料金プラン名': lambda x: ' / '.join(x.astype(str)), '平均使用量(m3)': 'mean', '設備利用率': 'mean', '実質単価(円/m3)': 'mean', '平均金額': 'mean', 'マスタ基本料金': 'mean'}).reset_index()
+        summary['新基本料金案'] = summary['マスタ基本料金'].round(0)
+        summary['新従量単価案'] = ((summary['平均金額'] - summary['新基本料金案']) / summary['平均使用量(m3)'].replace(0, 1)).round(2)
+        disp_summary = summary.drop(columns=['平均金額', 'マスタ基本料金']).rename(columns={'料金プラン名': '統合対象の現行プラン'})
         
         # 行番号(0,1,2)を消して「新グループ」を見出しに
         st.table(disp_summary.set_index('新グループ').style.format({
