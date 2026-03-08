@@ -147,7 +147,7 @@ try:
         df_features['新グループ'] = [chr(65 + i) for i in kmeans.fit_predict(X_scaled)]
         df_features = df_features.sort_values('新グループ')
 
-        # 描画：グラフ
+    # 描画：グラフ
         st.subheader("AI解析（3Dクラスタリング）")
         fig = px.scatter_3d(
             df_features, 
@@ -158,21 +158,18 @@ try:
             hover_name='料金プラン名', 
             height=750
         )
-        
-        # マーカー（点）を画像のように少し大きく見やすく調整
-        fig.update_traces(marker=dict(size=12, opacity=0.9))
 
-        # 画像の通りのデフォルト視点（カメラアングル）を設定
+        # カメラアングル（視点）の調整
+        # 設備利用率（Y軸）が右側奥、平均使用量（X軸）が手前、実質単価（Z軸）が左側になるように配置
         camera = dict(
-            up=dict(x=0, y=0, z=1),     # Z軸（実質単価）を上向きに固定
+            up=dict(x=0, y=0, z=1),     # Z軸を上向きに固定
             center=dict(x=0, y=0, z=0), # グラフの中心を捉える
-            eye=dict(x=0, y=-2.2, z=0.2) # 真正面（Y軸のマイナス方向）から、少しだけ見下ろす視点
+            eye=dict(x=1.5, y=-1.5, z=0.5) # 画像の傾きに合わせた視点（右斜め上から見下ろす）
         )
         
         fig.update_layout(scene_camera=camera)
         
         st.plotly_chart(fig, use_container_width=True)
-
         # 描画：提案テーブル
         st.subheader("AI集約提案")
         summary = df_features.groupby('新グループ').agg({'料金プラン名': lambda x: ' / '.join(x.astype(str)), '平均使用量(m3)': 'mean', '設備利用率': 'mean', '実質単価(円/m3)': 'mean', '平均金額': 'mean', 'マスタ基本料金': 'mean'}).reset_index()
