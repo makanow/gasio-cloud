@@ -149,16 +149,31 @@ try:
 
         # 描画：グラフ
         st.subheader("AI解析（3Dクラスタリング）")
-        # 画像の指示通り：X=使用量、Y=設備利用率、Z=平均単価 に修正
+        
         fig = px.scatter_3d(
             df_features, 
             x='平均使用量(m3)', 
-            y='設備利用率', 
-            z='実質単価(円/m3)', 
+            y='実質単価(円/m3)',  # 奥行き
+            z='設備利用率',       # 高さ
             color='新グループ', 
             hover_name='料金プラン名', 
             height=750
         )
+
+        # 画像のスケールと向きを再現するための調整
+        fig.update_layout(
+            scene=dict(
+                xaxis=dict(title='使用量 (m3)'),
+                yaxis=dict(
+                    title='平均単価 (円)',
+                    autorange='reversed'  # ← 画像の通り、単価の軸を反転させて手前を高くする
+                ),
+                zaxis=dict(title='設備利用率 (%)'),
+                aspectmode='manual',
+                aspectratio=dict(x=1, y=1, z=0.8) # 高さを少し抑えて見やすく
+            )
+        )
+        
         st.plotly_chart(fig, use_container_width=True)
 
         # 描画：提案テーブル
