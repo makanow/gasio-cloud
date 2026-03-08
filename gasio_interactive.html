@@ -1,0 +1,274 @@
+<script src="https://cdn.jsdelivr.net/npm/vue@3.3.4/dist/vue.global.js"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+
+<style>
+    #gasio-embed-wrapper { font-family: 'Helvetica Neue', Arial, sans-serif; width: 100%; box-sizing: border-box; }
+    #gasio-embed-wrapper svg { cursor: crosshair; user-select: none; overflow: visible; }
+    #gasio-embed-wrapper .handle { cursor: grab; }
+    #gasio-embed-wrapper .handle:active { cursor: grabbing; }
+    #gasio-embed-wrapper input[type=number]::-webkit-inner-spin-button { opacity: 1; height: 30px; }
+    [v-cloak] { display: none; }
+</style>
+
+<div id="gasio-embed-wrapper">
+    <div id="gasio-app" class="max-w-5xl mx-auto bg-white p-3 md:p-6 rounded-lg shadow-lg w-full" v-cloak>
+        <h1 class="text-2xl md:text-3xl font-bold text-gray-800 mb-1"><span class="text-blue-900">Gas</span><span class="text-red-500">i</span><span class="text-blue-500">o</span> Interactive</h1>
+        <p class="text-xs md:text-sm text-gray-500 border-b-2 border-blue-500 pb-2 mb-4 md:mb-6">直感型 料金表作成ツール</p>
+
+        <div class="flex flex-col md:flex-row md:space-x-8 space-y-4 md:space-y-0 mb-6">
+            <div class="flex-1 bg-gray-50 p-4 rounded-md border-l-4 border-blue-500 shadow-sm">
+                <label class="block text-sm font-bold text-gray-600 mb-2">ガスの使用量を動かす (m³)</label>
+                <input type="range" v-model.number="currentUsage" min="0" max="80" step="0.1" class="w-full cursor-pointer">
+                <div class="text-right text-gray-500 font-bold mt-1">{{ currentUsage.toFixed(1) }} m³</div>
+            </div>
+            <div class="flex-1 bg-gray-50 p-4 rounded-md border-l-4 border-red-500 shadow-sm flex flex-col justify-center items-center">
+                <span class="text-xs md:text-sm font-bold text-gray-600">この使用量でのガス料金</span>
+                <span class="text-3xl md:text-4xl font-bold text-red-500">¥{{ Math.round(currentFee).toLocaleString() }}</span>
+            </div>
+        </div>
+
+        <div class="relative bg-white border-2 border-gray-200 rounded-lg shadow-inner mb-6">
+            
+            <div class="hidden md:block absolute top-2 left-1/2 transform -translate-x-1/2 z-10 text-sm text-blue-600 font-bold bg-blue-50 px-3 py-1 rounded-full border border-blue-200 shadow-sm whitespace-nowrap">
+                👆 グラフと料金表が連動します
+            </div>
+
+            <svg ref="svgRef" width="100%" height="300" viewBox="0 0 800 400" preserveAspectRatio="none" class="w-full h-full block md:h-[400px]">
+                <defs>
+                    <clipPath id="graph-clip"><rect x="0" y="0" width="800" height="400" /></clipPath>
+                </defs>
+
+                <line v-for="i in 4" :key="'y'+i" x1="0" :y1="i*100" x2="800" :y2="i*100" stroke="#e2e8f0" stroke-width="1"></line>
+                <line v-for="i in 8" :key="'x'+i" :x1="i*100" y1="0" :x2="i*100" y2="400" stroke="#e2e8f0" stroke-width="1"></line>
+                
+                <polyline clip-path="url(#graph-clip)" :points="polylinePoints" fill="none" stroke="#3498db" stroke-width="4" stroke-linejoin="round"></polyline>
+                <polygon clip-path="url(#graph-clip)" :points="polygonPoints" fill="rgba(52, 152, 219, 0.1)"></polygon>
+                
+                <line clip-path="url(#graph-clip)" :x1="xToPx(currentUsage)" y1="0" :x2="xToPx(currentUsage)" y2="400" stroke="#2c3e50" stroke-dasharray="5,5" stroke-width="2"></line>
+                <circle clip-path="url(#graph-clip)" :cx="xToPx(currentUsage)" :cy="yToPx(currentFee)" r="7" fill="#e74c3c" stroke="white" stroke-width="2"></circle>
+
+                <g v-for="(p, index) in points" :key="index">
+                    <circle :cx="xToPx(p.x)" :cy="yToPx(p.y)" :r="index === 0 ? 40 : 30" fill="transparent" class="handle" @mousedown="startDrag($event, index)" @touchstart.prevent="startDrag($event, index)"></circle>
+                    <circle :cx="xToPx(p.x)" :cy="yToPx(p.y)" :r="draggingIndex === index ? 14 : 10" :fill="index === 0 ? '#f39c12' : '#3498db'" stroke="white" stroke-width="3" style="pointer-events: none;"></circle>
+                </g>
+            </svg>
+            <div class="absolute bottom-1 left-2 text-[10px] md:text-xs text-gray-400 font-bold">0 m³</div>
+            <div class="absolute bottom-1 right-2 text-[10px] md:text-xs text-gray-400 font-bold">80 m³</div>
+            <div class="absolute top-1 left-2 text-[10px] md:text-xs text-gray-400 font-bold">¥{{ dynamicMaxY.toLocaleString() }}</div>
+        </div>
+
+        <div class="flex flex-col md:flex-row justify-between items-center mb-3 space-y-3 md:space-y-0">
+            <h2 class="text-base md:text-xl font-bold text-gray-700 w-full md:w-auto">📊 料金表 </h2>
+            <div class="flex space-x-2 w-full md:w-auto justify-end">
+                <button @click="addTier" class="flex-1 md:flex-none bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded shadow text-sm">＋ 区画追加</button>
+                <button @click="removeTier" class="flex-1 md:flex-none bg-gray-400 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded shadow text-sm">－ 区画削除</button>
+            </div>
+        </div>
+
+        <div class="overflow-x-auto border-2 border-gray-100 rounded-lg shadow-sm mb-6">
+            <table class="min-w-full bg-white text-xs md:text-sm text-center whitespace-nowrap">
+                <thead class="bg-gray-100 font-bold text-gray-600">
+                    <tr>
+                        <th class="py-3 px-2 border-b">区画名</th>
+                        <th class="py-3 px-2 border-b text-blue-600">適用上限 (m³) ✏️</th>
+                        <th class="py-3 px-2 border-b text-orange-600">基本料金 (円) ✏️</th>
+                        <th class="py-3 px-2 border-b text-red-600">従量料金 (円/m³) ✏️</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr v-for="(tier, index) in tiers" :key="index" class="hover:bg-blue-50 transition-colors border-b last:border-b-0">
+                        <td class="py-3 px-2 font-bold text-gray-700">{{ tableData[index].name }}</td>
+                        <td class="py-3 px-2">
+                            <div v-if="index === tiers.length - 1" class="text-blue-600 font-bold">上限なし</div>
+                            <input v-else type="number" v-model.number="tier.limit" step="0.0001" min="0" 
+                                   class="w-20 md:w-28 p-2 border-2 border-blue-200 rounded text-center focus:ring-2 focus:ring-blue-400 bg-blue-50 font-bold text-blue-700">
+                        </td>
+                        <td class="py-3 px-2">
+                            <div v-if="index === 0" class="flex justify-center items-center space-x-1">
+                                <span class="text-gray-400">¥</span>
+                                <input type="number" v-model.number="baseA" step="0.0001" min="0"
+                                       class="w-24 md:w-32 p-2 border-2 border-orange-200 rounded text-center focus:ring-2 focus:ring-orange-400 bg-orange-50 font-bold text-orange-700">
+                            </div>
+                            <div v-else class="font-bold text-gray-400 bg-gray-50 p-2 rounded border border-dashed border-gray-200 inline-block min-w-[100px]">
+                                ¥{{ tableData[index].base.toFixed(4) }}
+                            </div>
+                        </td>
+                        <td class="py-3 px-2">
+                            <div class="flex justify-center items-center space-x-1">
+                                <span class="text-gray-400">¥</span>
+                                <input type="number" v-model.number="tier.unit" step="0.0001" min="0"
+                                       class="w-20 md:w-28 p-2 border-2 border-red-200 rounded text-center focus:ring-2 focus:ring-red-400 bg-red-50 font-bold text-red-600">
+                            </div>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="flex justify-end">
+            <button @click="exportCSV" class="w-full md:w-auto bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-8 rounded-full shadow-lg text-base flex items-center justify-center transition-all transform hover:scale-105 active:scale-95">
+                <span class="mr-2 text-xl">💾</span> このプランをExcel(CSV)で保存する
+            </button>
+        </div>
+    </div>
+</div>
+
+<script>
+    window.onload = function() {
+        if (typeof Vue === 'undefined') return;
+        // windowイベントを使うため onMounted, onUnmounted を追加読込
+        const { createApp, ref, computed, watch, onMounted, onUnmounted } = Vue;
+
+        createApp({
+            setup() {
+                const svgRef = ref(null);
+                const baseA = ref(1500.0);
+                const tiers = ref([{ limit: 10.0, unit: 450.0 }, { limit: 30.0, unit: 350.0 }, { limit: 99999.0, unit: 250.0 }]);
+                const currentUsage = ref(25.0);
+                const draggingIndex = ref(null);
+                const maxX = 80; 
+                const dynamicMaxY = ref(25000); // 初期スケール
+
+                // 現在の料金に応じてY軸の天井(maxY)を自動調整する機能
+                const adjustMaxY = () => {
+                    let cY = baseA.value; let cX = 0;
+                    tiers.value.forEach(t => {
+                        let nX = t.limit === 99999 ? 80 : t.limit;
+                        cY += t.unit * (nX - cX);
+                        cX = nX;
+                    });
+                    // 最小は25000円。それを超える場合は5000円刻みでスケール拡張
+                    let newMax = Math.max(25000, Math.ceil(cY / 5000) * 5000 + 5000);
+                    dynamicMaxY.value = newMax;
+                };
+
+                const snap = (val, threshold = 0.3) => {
+                    const rounded = Math.round(val);
+                    return Math.abs(val - rounded) < threshold ? rounded : val;
+                };
+
+                const xToPx = (x) => (x / maxX) * 800;
+                // スケール計算を dynamicMaxY ベースに変更
+                const yToPx = (y) => 400 - (y / dynamicMaxY.value) * 400;
+                const pxToX = (px) => (px / 800) * maxX;
+                const pxToY = (py) => ((400 - py) / 400) * dynamicMaxY.value;
+
+                const points = computed(() => {
+                    let pts = [{ x: 0, y: baseA.value }];
+                    let cY = baseA.value; let cX = 0;
+                    tiers.value.forEach(t => {
+                        let nX = t.limit === 99999 ? 80 : t.limit;
+                        let nY = cY + t.unit * (nX - cX);
+                        pts.push({ x: nX, y: nY });
+                        cX = nX; cY = nY;
+                    });
+                    return pts;
+                });
+
+                // 値が直接入力などで変わった瞬間に天井をオートスケール（ドラッグ中以外）
+                watch(points, () => {
+                    if (draggingIndex.value === null) adjustMaxY();
+                }, { deep: true });
+
+                const polylinePoints = computed(() => points.value.map(p => `${xToPx(p.x)},${yToPx(p.y)}`).join(' '));
+                const polygonPoints = computed(() => `0,400 ${polylinePoints.value} 800,400`);
+                
+                const currentFee = computed(() => {
+                    let u = currentUsage.value; let f = 0; let cY = baseA.value; let cX = 0;
+                    for(let t of tiers.value){
+                        if(u <= t.limit){ f = cY + t.unit * (u - cX); break; }
+                        cY += t.unit * (t.limit - cX); cX = t.limit;
+                    }
+                    return Math.max(0, f);
+                });
+
+                const tableData = computed(() => {
+                    let res = []; let cY = baseA.value; let cX = 0;
+                    tiers.value.forEach((t, i) => {
+                        res.push({ name: String.fromCharCode(65+i) + "区画", base: cY - (t.unit * cX) });
+                        if(t.limit !== 99999){ cY += t.unit * (t.limit - cX); cX = t.limit; }
+                    });
+                    return res;
+                });
+
+                const exportCSV = () => {
+                    let csv = "\ufeff区画名,適用上限(m3),仮想基本料金(円),単位料金(円/m3)\n";
+                    tiers.value.forEach((t, i) => {
+                        const limit = t.limit === 99999 ? "上限なし" : t.limit.toFixed(4);
+                        const base = i === 0 ? baseA.value.toFixed(4) : tableData.value[i].base.toFixed(4);
+                        csv += `${tableData.value[i].name},${limit},${base},${t.unit.toFixed(4)}\n`;
+                    });
+                    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+                    const url = URL.createObjectURL(blob);
+                    const link = document.createElement("a");
+                    link.href = url;
+                    link.setAttribute("download", `Gasio_Plan_${new Date().toLocaleDateString().replace(/\//g, '-')}.csv`);
+                    document.body.appendChild(link); link.click(); document.body.removeChild(link);
+                };
+
+                const startDrag = (e, i) => { draggingIndex.value = i; };
+                
+                const stopDrag = () => { 
+                    if (draggingIndex.value !== null) {
+                        draggingIndex.value = null; 
+                        adjustMaxY(); // ドラッグが終わった瞬間にスケールを合わせる
+                    }
+                };
+
+                const processDrag = (clientX, clientY) => {
+                    if (draggingIndex.value === null || !svgRef.value) return;
+                    const rect = svgRef.value.getBoundingClientRect();
+                    let nX = pxToX(clientX - rect.left); 
+                    // 上限(Math.min)を撤廃し、枠の上に引っ張っても値が増え続けるように
+                    let nY = Math.max(0, pxToY(clientY - rect.top)); 
+                    let i = draggingIndex.value;
+                    
+                    if (i === 0) {
+                        baseA.value = parseFloat(snap(nY).toFixed(4));
+                    } else if (i === points.value.length - 1) {
+                        let unitValue = (nY - points.value[i-1].y) / (80 - points.value[i-1].x);
+                        tiers.value[i-1].unit = parseFloat(Math.max(0, snap(unitValue)).toFixed(4));
+                    } else {
+                        nX = Math.max(points.value[i-1].x + 0.5, Math.min(nX, points.value[i+1].x - 0.5));
+                        tiers.value[i-1].limit = parseFloat(snap(nX).toFixed(4));
+                        let unitValue = (nY - points.value[i-1].y) / (nX - points.value[i-1].x);
+                        tiers.value[i-1].unit = parseFloat(Math.max(0, snap(unitValue)).toFixed(4));
+                    }
+                };
+
+                // ウィンドウ全体でマウスを捕捉し、枠外ドラッグを可能にする
+                const handleMouseMove = (e) => {
+                    if (draggingIndex.value !== null) processDrag(e.clientX, e.clientY);
+                };
+                const handleTouchMove = (e) => {
+                    if (draggingIndex.value !== null) {
+                        e.preventDefault(); // スマホの画面スクロールを防ぐ
+                        processDrag(e.touches[0].clientX, e.touches[0].clientY);
+                    }
+                };
+
+                // 起動時にイベントリスナーを登録
+                onMounted(() => {
+                    window.addEventListener('mousemove', handleMouseMove);
+                    window.addEventListener('mouseup', stopDrag);
+                    window.addEventListener('touchmove', handleTouchMove, { passive: false });
+                    window.addEventListener('touchend', stopDrag);
+                    adjustMaxY();
+                });
+
+                // 終了時にクリーンアップ
+                onUnmounted(() => {
+                    window.removeEventListener('mousemove', handleMouseMove);
+                    window.removeEventListener('mouseup', stopDrag);
+                    window.removeEventListener('touchmove', handleTouchMove);
+                    window.removeEventListener('touchend', stopDrag);
+                });
+
+                return { svgRef, baseA, tiers, currentUsage, currentFee, points, tableData, xToPx, yToPx, polylinePoints, polygonPoints, startDrag, draggingIndex, dynamicMaxY,
+                    addTier:() => { if(tiers.value.length<8){ let last=tiers.value.length-1; let pL=last>0?tiers.value[last-1].limit:0; tiers.value.splice(last,0,{limit:parseFloat((pL+(80-pL)/2).toFixed(4)), unit:tiers.value[last].unit}); }}, 
+                    removeTier:() => { if(tiers.value.length>2) tiers.value.splice(tiers.value.length-2,1); }, 
+                    exportCSV };
+            }
+        }).mount('#gasio-app');
+    };
+</script>
