@@ -149,7 +149,16 @@ try:
 
         # 描画：グラフ
         st.subheader("AI解析（3Dクラスタリング）")
-        fig = px.scatter_3d(df_features, x='平均使用量(m3)', y='設備利用率', z='実質単価(円/m3)', color='新グループ', hover_name='料金プラン名', height=750)
+        # 画像の指示通り：X=使用量、Y=設備利用率、Z=平均単価 に修正
+        fig = px.scatter_3d(
+            df_features, 
+            x='平均使用量(m3)', 
+            y='設備利用率', 
+            z='実質単価(円/m3)', 
+            color='新グループ', 
+            hover_name='料金プラン名', 
+            height=750
+        )
         st.plotly_chart(fig, use_container_width=True)
 
         # 描画：提案テーブル
