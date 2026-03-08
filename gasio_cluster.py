@@ -176,44 +176,34 @@ try:
         
         st.plotly_chart(fig, use_container_width=True)
 
-        # 描画：グラフ
+    # 描画：グラフ
         st.subheader("AI解析（3Dクラスタリング）")
         
+        # 軸の割り当てを画像のスケッチ通りに再定義
         fig = px.scatter_3d(
             df_features, 
-            x='平均使用量(m3)', 
-            y='実質単価(円/m3)', # ここを「高さ」にするために後でsceneで指定
-            z='設備利用率',      # ここを「奥行き」にするために後でsceneで指定
+            x='平均使用量(m3)',   # 横軸
+            y='実質単価(円/m3)',  # 奥行軸
+            z='設備利用率',       # 垂直（高さ）軸
             color='新グループ', 
             hover_name='料金プラン名', 
             height=750
         )
 
-        # 画像のメモリ（スケール）の並びを完全に再現
         fig.update_layout(
             scene=dict(
-                # X軸：使用量（右から左へ増えるように反転）
-                xaxis=dict(
-                    title='使用量(m3)',
-                    autorange='reversed' 
-                ),
-                # Y軸：実質単価（垂直方向・高さとして扱う）
-                yaxis=dict(
-                    title='実質単価(円/m3)'
-                ),
-                # Z軸：設備利用率（奥行き・手前ほど大きく反転）
-                zaxis=dict(
-                    title='設備利用率(%)',
-                    autorange='reversed'
-                ),
-                # 画像のパースに合わせるためのカメラアングル設定
+                # 画像の指示：数値が左や手前に向かって大きくなっている可能性を考慮
+                xaxis=dict(title='使用量 (m3)', autorange='reversed'),
+                yaxis=dict(title='平均単価 (円)', autorange='reversed'),
+                zaxis=dict(title='設備利用率 (%)'),
+                # 重要：カメラアングルを画像のパース（斜め俯瞰）に強制固定
                 camera=dict(
-                    eye=dict(x=1.5, y=1.5, z=1.5) 
+                    eye=dict(x=-1.5, y=-1.5, z=1.2) # 反転させた軸を「正面」から捉える設定
                 ),
-                aspectmode='cube'
+                aspectmode='manual',
+                aspectratio=dict(x=1, y=1, z=0.7)
             )
         )
-        
         st.plotly_chart(fig, use_container_width=True)
         
         # 行番号(0,1,2)を消して「新グループ」を見出しに
