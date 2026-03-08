@@ -164,7 +164,7 @@ try:
         camera = dict(
             up=dict(x=0, y=0, z=1),     # Z軸を上向きに固定
             center=dict(x=0, y=0, z=0), # グラフの中心を捉える
-            eye=dict(x=1.5, y=-1.5, z=0.7) # 画像の傾きに合わせた視点（右斜め上から見下ろす）
+            eye=dict(x=1.5, y=-1.5, z=0.5) # 画像の傾きに合わせた視点（右斜め上から見下ろす）
         )
         
         fig.update_layout(scene_camera=camera)
