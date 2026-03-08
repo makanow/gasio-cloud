@@ -149,18 +149,9 @@ try:
 
         # 描画：グラフ
         st.subheader("AI解析（3Dクラスタリング）")
-        # 修正箇所：x, y, z のカラム指定を変更
-        fig = px.scatter_3d(
-            df_features, 
-            x='平均使用量(m3)', 
-            y='実質単価(円/m3)', 
-            z='設備利用率', 
-            color='新グループ', 
-            hover_name='料金プラン名', 
-            height=750
-        )
+        fig = px.scatter_3d(df_features, x='平均使用量(m3)', y='設備利用率', z='実質単価(円/m3)', color='新グループ', hover_name='料金プラン名', height=750)
         st.plotly_chart(fig, use_container_width=True)
-        
+
         # 描画：提案テーブル
         st.subheader("AI集約提案")
         summary = df_features.groupby('新グループ').agg({'料金プラン名': lambda x: ' / '.join(x.astype(str)), '平均使用量(m3)': 'mean', '設備利用率': 'mean', '実質単価(円/m3)': 'mean', '平均金額': 'mean', 'マスタ基本料金': 'mean'}).reset_index()
