@@ -149,7 +149,28 @@ try:
 
         # 描画：グラフ
         st.subheader("AI解析（3Dクラスタリング）")
-        fig = px.scatter_3d(df_features, x='平均使用量(m3)', y='設備利用率', z='実質単価(円/m3)', color='新グループ', hover_name='料金プラン名', height=750)
+        fig = px.scatter_3d(
+            df_features, 
+            x='平均使用量(m3)', 
+            y='設備利用率', 
+            z='実質単価(円/m3)', 
+            color='新グループ', 
+            hover_name='料金プラン名', 
+            height=750
+        )
+        
+        # マーカー（点）を画像のように少し大きく見やすく調整
+        fig.update_traces(marker=dict(size=12, opacity=0.9))
+
+        # 画像の通りのデフォルト視点（カメラアングル）を設定
+        camera = dict(
+            up=dict(x=0, y=0, z=1),     # Z軸（実質単価）を上向きに固定
+            center=dict(x=0, y=0, z=0), # グラフの中心を捉える
+            eye=dict(x=0, y=-2.2, z=0.2) # 真正面（Y軸のマイナス方向）から、少しだけ見下ろす視点
+        )
+        
+        fig.update_layout(scene_camera=camera)
+        
         st.plotly_chart(fig, use_container_width=True)
 
         # 描画：提案テーブル
