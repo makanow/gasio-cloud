@@ -176,12 +176,45 @@ try:
         
         st.plotly_chart(fig, use_container_width=True)
 
-        # 描画：提案テーブル
-        st.subheader("AI集約提案")
-        summary = df_features.groupby('新グループ').agg({'料金プラン名': lambda x: ' / '.join(x.astype(str)), '平均使用量(m3)': 'mean', '設備利用率': 'mean', '実質単価(円/m3)': 'mean', '平均金額': 'mean', 'マスタ基本料金': 'mean'}).reset_index()
-        summary['新基本料金案'] = summary['マスタ基本料金'].round(0)
-        summary['新従量単価案'] = ((summary['平均金額'] - summary['新基本料金案']) / summary['平均使用量(m3)'].replace(0, 1)).round(2)
-        disp_summary = summary.drop(columns=['平均金額', 'マスタ基本料金']).rename(columns={'料金プラン名': '統合対象の現行プラン'})
+        # 描画：グラフ
+        st.subheader("AI解析（3Dクラスタリング）")
+        
+        fig = px.scatter_3d(
+            df_features, 
+            x='平均使用量(m3)', 
+            y='実質単価(円/m3)', # ここを「高さ」にするために後でsceneで指定
+            z='設備利用率',      # ここを「奥行き」にするために後でsceneで指定
+            color='新グループ', 
+            hover_name='料金プラン名', 
+            height=750
+        )
+
+        # 画像のメモリ（スケール）の並びを完全に再現
+        fig.update_layout(
+            scene=dict(
+                # X軸：使用量（右から左へ増えるように反転）
+                xaxis=dict(
+                    title='使用量(m3)',
+                    autorange='reversed' 
+                ),
+                # Y軸：実質単価（垂直方向・高さとして扱う）
+                yaxis=dict(
+                    title='実質単価(円/m3)'
+                ),
+                # Z軸：設備利用率（奥行き・手前ほど大きく反転）
+                zaxis=dict(
+                    title='設備利用率(%)',
+                    autorange='reversed'
+                ),
+                # 画像のパースに合わせるためのカメラアングル設定
+                camera=dict(
+                    eye=dict(x=1.5, y=1.5, z=1.5) 
+                ),
+                aspectmode='cube'
+            )
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
         
         # 行番号(0,1,2)を消して「新グループ」を見出しに
         st.table(disp_summary.set_index('新グループ').style.format({
