@@ -364,10 +364,13 @@ if df_usage is not None and df_master_all is not None and selected_ids:
             st.markdown(f"**Proposal: {sel_p}構成**")
             # 新区画判定の高速化
             m_pdf = new_plans[sel_p].sort_values('MAX')
-            bins_n = [0.0] + m_pdf['MAX'].tolist()
-            if bins_n[0] == bins_n[1]: bins_n[0] = -0.001
-            labels_n = m_pdf['区画名'].tolist()
-            df_target_usage['新区画'] = pd.cut(df_target_usage['使用量'], bins=bins_n, labels=labels_n, right=True).astype(str)
+            def get_new_tier(usage, plan_df):
+                for _, row in plan_df.iterrows():
+                    if row['MIN'] <= usage <= row['MAX']:
+                        return row['区画名']
+                return np.nan
+            
+            df_target_usage['新区画'] = df_target_usage['使用量'].apply(lambda x: get_new_tier(x, m_pdf))
             
             agg_n = df_target_usage.groupby('新区画').agg(件数=('使用量','count'), 使用量=('使用量','sum')).reset_index()
             st.plotly_chart(px.pie(agg_n, values='件数', names='新区画', hole=0.5, color_discrete_sequence=CHIC_PIE_COLORS), use_container_width=True)
