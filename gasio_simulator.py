@@ -355,7 +355,7 @@ if df_usage is not None and df_master_all is not None and selected_ids:
             with gc2: st.plotly_chart(px.scatter(sr.sample(min(len(sr),1000)), x='使用量', y=['現行料金', sel_p], title="新旧料金プロット", opacity=0.6), use_container_width=True)
             st.dataframe(pd.DataFrame(summ_list).style.format({"売上総額":"¥{:,.0f}","差額":"¥{:,.0f}","増減率":"{:.2f}%"}), hide_index=True, use_container_width=True)
 
-   with tab_analysis:
+with tab_analysis:
         st.markdown("##### 需要構成分析")
         sel_p = st.selectbox("比較対象", list(new_plans.keys()), key="s_p_a")
         fps = {tid: tuple(sorted(df_master_all[df_master_all['料金表番号']==tid]['MAX'].unique())) for tid in selected_ids}
@@ -364,7 +364,7 @@ if df_usage is not None and df_master_all is not None and selected_ids:
         ids_consistent = (len(set(fps.values())) <= 1)
         
         if ids_consistent:
-            # ここで先ほど追加した「高速化用の関数」を呼び出します
+            # 高速化用の計算関数を呼び出す
             agg_c, agg_n = get_cached_analysis(df_target_usage, selected_ids, df_master_all, new_plans[sel_p])
         
         g1, g2 = st.columns(2)
