@@ -116,7 +116,6 @@
 <script>
     window.onload = function() {
         if (typeof Vue === 'undefined') return;
-        // windowイベントを使うため onMounted, onUnmounted を追加読込
         const { createApp, ref, computed, watch, onMounted, onUnmounted } = Vue;
 
         createApp({
@@ -127,9 +126,8 @@
                 const currentUsage = ref(25.0);
                 const draggingIndex = ref(null);
                 const maxX = 80; 
-                const dynamicMaxY = ref(25000); // 初期スケール
+                const dynamicMaxY = ref(25000); 
 
-                // 現在の料金に応じてY軸の天井(maxY)を自動調整する機能
                 const adjustMaxY = () => {
                     let cY = baseA.value; let cX = 0;
                     tiers.value.forEach(t => {
@@ -137,7 +135,6 @@
                         cY += t.unit * (nX - cX);
                         cX = nX;
                     });
-                    // 最小は25000円。それを超える場合は5000円刻みでスケール拡張
                     let newMax = Math.max(25000, Math.ceil(cY / 5000) * 5000 + 5000);
                     dynamicMaxY.value = newMax;
                 };
@@ -148,7 +145,6 @@
                 };
 
                 const xToPx = (x) => (x / maxX) * 800;
-                // スケール計算を dynamicMaxY ベースに変更
                 const yToPx = (y) => 400 - (y / dynamicMaxY.value) * 400;
                 const pxToX = (px) => (px / 800) * maxX;
                 const pxToY = (py) => ((400 - py) / 400) * dynamicMaxY.value;
@@ -165,7 +161,6 @@
                     return pts;
                 });
 
-                // 値が直接入力などで変わった瞬間に天井をオートスケール（ドラッグ中以外）
                 watch(points, () => {
                     if (draggingIndex.value === null) adjustMaxY();
                 }, { deep: true });
@@ -211,7 +206,7 @@
                 const stopDrag = () => { 
                     if (draggingIndex.value !== null) {
                         draggingIndex.value = null; 
-                        adjustMaxY(); // ドラッグが終わった瞬間にスケールを合わせる
+                        adjustMaxY(); 
                     }
                 };
 
@@ -219,35 +214,38 @@
                     if (draggingIndex.value === null || !svgRef.value) return;
                     const rect = svgRef.value.getBoundingClientRect();
                     let nX = pxToX(clientX - rect.left); 
-                    // 上限(Math.min)を撤廃し、枠の上に引っ張っても値が増え続けるように
                     let nY = Math.max(0, pxToY(clientY - rect.top)); 
+                    
                     let i = draggingIndex.value;
                     
+                    // ▼ 修正点：料金そのものを5円刻みにスナップさせる
                     if (i === 0) {
-                        baseA.value = parseFloat(snap(nY).toFixed(4));
+                        // 基本料金を5円刻み
+                        baseA.value = Math.round(nY / 5) * 5;
                     } else if (i === points.value.length - 1) {
+                        // 最後のポイント：従量料金（単価）を5円刻み
                         let unitValue = (nY - points.value[i-1].y) / (80 - points.value[i-1].x);
-                        tiers.value[i-1].unit = parseFloat(Math.max(0, snap(unitValue)).toFixed(4));
+                        tiers.value[i-1].unit = Math.max(0, Math.round(unitValue / 5) * 5);
                     } else {
+                        // 途中のポイント：X軸はそのまま、従量料金（単価）を5円刻み
                         nX = Math.max(points.value[i-1].x + 0.5, Math.min(nX, points.value[i+1].x - 0.5));
                         tiers.value[i-1].limit = parseFloat(snap(nX).toFixed(4));
+                        
                         let unitValue = (nY - points.value[i-1].y) / (nX - points.value[i-1].x);
-                        tiers.value[i-1].unit = parseFloat(Math.max(0, snap(unitValue)).toFixed(4));
+                        tiers.value[i-1].unit = Math.max(0, Math.round(unitValue / 5) * 5);
                     }
                 };
 
-                // ウィンドウ全体でマウスを捕捉し、枠外ドラッグを可能にする
                 const handleMouseMove = (e) => {
                     if (draggingIndex.value !== null) processDrag(e.clientX, e.clientY);
                 };
                 const handleTouchMove = (e) => {
                     if (draggingIndex.value !== null) {
-                        e.preventDefault(); // スマホの画面スクロールを防ぐ
+                        e.preventDefault(); 
                         processDrag(e.touches[0].clientX, e.touches[0].clientY);
                     }
                 };
 
-                // 起動時にイベントリスナーを登録
                 onMounted(() => {
                     window.addEventListener('mousemove', handleMouseMove);
                     window.addEventListener('mouseup', stopDrag);
@@ -256,7 +254,6 @@
                     adjustMaxY();
                 });
 
-                // 終了時にクリーンアップ
                 onUnmounted(() => {
                     window.removeEventListener('mousemove', handleMouseMove);
                     window.removeEventListener('mouseup', stopDrag);
