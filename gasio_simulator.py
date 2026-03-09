@@ -155,7 +155,6 @@ def calculate_slide_rates(base_a, blocks_df):
     return base_fees
 
 def calculate_bill_single(usage, tariff_df):
-    """1件計算用（互換性維持のため残す）"""
     if tariff_df.empty: return 0
     df = tariff_df.copy()
     if '適用上限(m3)' in df.columns: df = df.rename(columns={'適用上限(m3)':'MAX'})
@@ -164,25 +163,6 @@ def calculate_bill_single(usage, tariff_df):
     row = target.iloc[0] if not target.empty else df.sort_values('MAX').iloc[-1]
     return int(row.get('基本料金', 0) + (usage * row['単位料金']))
 
-def calculate_bill_vectorized(usage_series, p_df):
-    """大量データ用（爆速計算用）"""
-    if p_df.empty: return pd.Series(0, index=usage_series.index)
-    # 料金表の準備
-    master = p_df.copy().sort_values('MAX')
-    bins = [0.0] + master['MAX'].tolist()
-    # 0件付近の計算エラー防止
-    if bins[0] == bins[1]: bins[0] = -0.001
-    
-    # どの区画に入るか一括判定
-    labels = range(len(master))
-    indices = pd.cut(usage_series, bins=bins, labels=labels, right=True)
-    indices = indices.fillna(0).astype(int)
-    
-    # 基本料金と単位料金を全行一気に適用
-    base_fees = master['基本料金'].values[indices]
-    unit_prices = master['単位料金'].values[indices]
-    
-    return base_fees + (usage_series.values * unit_prices)
 def get_tier_name(usage, tariff_df):
     if tariff_df.empty: return "Unknown"
     df = tariff_df.copy()
@@ -300,7 +280,7 @@ if df_usage is not None and df_master_all is not None and selected_ids:
         st.markdown("###### 📈 料金カーブ比較 (0〜50m3)")
         compare_df = pd.DataFrame({"使用量": list(range(0, 51, 2))})
         for p_name, p_df in new_plans.items():
-            compare_df[p_name] = calculate_bill_vectorized(compare_df["使用量"], p_df)
+            compare_df[p_name] = compare_df["使用量"].apply(lambda v: calculate_bill_single(v, p_df))
         
         fig = px.line(compare_df, x="使用量", y=list(new_plans.keys()), height=300, color_discrete_sequence=['#3498db', '#e74c3c', '#2ecc71'])
         fig.update_layout(yaxis_title="ガス料金(円)", legend_title="プラン", margin=dict(l=0, r=0, t=10, b=0))
@@ -337,15 +317,10 @@ if df_usage is not None and df_master_all is not None and selected_ids:
         if st.button("🚀 計算実行", key="calc_run", type="primary"):
             with st.spinner("Calculating..."):
                 res = df_target_usage.copy()
-                res['現行料金'] = 0.0
-for tid in selected_ids:
-    mask = res['料金表番号'] == tid
-    if mask.any():
-        m_df = df_master_all[df_master_all['料金表番号'] == tid]
-        res.loc[mask, '現行料金'] = calculate_bill_vectorized(res.loc[mask, '使用量'], m_df)
+                res['現行料金'] = res.apply(lambda r: calculate_bill_single(r['使用量'], df_master_all[df_master_all['料金表番号']==r['料金表番号']]), axis=1)
                 for pn, pdf in new_plans.items():
-    res[pn] = calculate_bill_vectorized(res['使用量'], pdf)
-    res[f"{pn}_差額"] = res[pn] - res['現行料金']
+                    res[pn] = res.apply(lambda r: calculate_bill_single(r['使用量'], pdf), axis=1)
+                    res[f"{pn}_差額"] = res[pn] - res['現行料金']
                 st.session_state.simulation_result = res
         
         if st.session_state.simulation_result is not None:
@@ -388,12 +363,7 @@ for tid in selected_ids:
             st.markdown("**Current: 現行構成**")
             if ids_consistent:
                 m_rep = df_master_all[df_master_all['料金表番号'] == selected_ids[0]].sort_values('MAX').reset_index(drop=True)
-                # 一括で区画判定するロジックに置換
-m_pdf = new_plans[sel_p].sort_values('MAX')
-bins_n = [0.0] + m_pdf['MAX'].tolist()
-if bins_n[0] == bins_n[1]: bins_n[0] = -0.001
-labels_n = m_pdf['区画名'].tolist()
-df_target_usage['新区画'] = pd.cut(df_target_usage['使用量'], bins=bins_n, labels=labels_n, right=True).astype(str)
+                df_target_usage['現行区画'] = df_target_usage['使用量'].apply(lambda x: get_tier_name(x, m_rep))
                 agg_c = df_target_usage.groupby('現行区画').agg(件数=('使用量','count'), 使用量=('使用量','sum')).reset_index()
                 st.plotly_chart(px.pie(agg_c, values='件数', names='現行区画', hole=0.5, color_discrete_sequence=CHIC_PIE_COLORS), use_container_width=True)
                 st.dataframe(agg_c.style.format({"使用量":"{:,.1f}"}), hide_index=True, use_container_width=True)
