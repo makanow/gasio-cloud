@@ -307,9 +307,9 @@ if df_usage is not None and df_master_all is not None and selected_ids:
                 with c2:
                     edited = st.data_editor(st.session_state.plan_data[i], use_container_width=True, key=f"ed_plan_{i}", 
                                            column_config={"No": st.column_config.NumberColumn(disabled=True), "区画名": st.column_config.TextColumn("🖋️ 区画名"), "適用上限(m3)": st.column_config.NumberColumn("🖋️ 適用上限", format="%.1f"), "単位料金": st.column_config.NumberColumn("🖋️ 単位料金", format="%.4f")})
-                    if not edited.equals(st.session_state.plan_data[i]):
+                   if edited.to_dict() != st.session_state.plan_data[i].to_dict():
                         st.session_state.plan_data[i] = edited
-
+                        st.rerun()
     with tab_sim:
         st.markdown("##### 収支影響シミュレーション")
         if st.button("🚀 計算実行", key="calc_run", type="primary"):
