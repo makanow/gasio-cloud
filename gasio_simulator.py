@@ -182,11 +182,12 @@ with st.sidebar:
     with st.expander("ℹ️ CSVインポートガイダンス", expanded=False):
         st.markdown("""
         **【1. 使用量CSV】**
-        - `料金表番号` : マスタと照合するキー
+        - `料金表番号` (任意): マスタと照合するキー
         - `使用量`: 月間のガス使用量
+        ※調定数・取り付け数は不要です。自動で除外されます。
         
         **【2. 料金表マスタCSV】**
-        - `料金表番号` 
+        - `料金表番号` (任意)
         - `MIN`, `MAX`: 各区画の適用範囲
         - `基本料金`, `単位料金`: 各区画の料金設定
         """)
@@ -307,9 +308,10 @@ if df_usage is not None and df_master_all is not None and selected_ids:
                 with c2:
                     edited = st.data_editor(st.session_state.plan_data[i], use_container_width=True, key=f"ed_plan_{i}", 
                                            column_config={"No": st.column_config.NumberColumn(disabled=True), "区画名": st.column_config.TextColumn("🖋️ 区画名"), "適用上限(m3)": st.column_config.NumberColumn("🖋️ 適用上限", format="%.1f"), "単位料金": st.column_config.NumberColumn("🖋️ 単位料金", format="%.4f")})
-                   if edited.to_dict() != st.session_state.plan_data[i].to_dict():
+                    if not edited.equals(st.session_state.plan_data[i]):
                         st.session_state.plan_data[i] = edited
                         st.rerun()
+
     with tab_sim:
         st.markdown("##### 収支影響シミュレーション")
         if st.button("🚀 計算実行", key="calc_run", type="primary"):
