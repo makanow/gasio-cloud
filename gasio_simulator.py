@@ -337,10 +337,15 @@ if df_usage is not None and df_master_all is not None and selected_ids:
         if st.button("🚀 計算実行", key="calc_run", type="primary"):
             with st.spinner("Calculating..."):
                 res = df_target_usage.copy()
-                res['現行料金'] = res.apply(lambda r: calculate_bill_single(r['使用量'], df_master_all[df_master_all['料金表番号']==r['料金表番号']]), axis=1)
+                res['現行料金'] = 0.0
+for tid in selected_ids:
+    mask = res['料金表番号'] == tid
+    if mask.any():
+        m_df = df_master_all[df_master_all['料金表番号'] == tid]
+        res.loc[mask, '現行料金'] = calculate_bill_vectorized(res.loc[mask, '使用量'], m_df)
                 for pn, pdf in new_plans.items():
-                    res[pn] = res.apply(lambda r: calculate_bill_single(r['使用量'], pdf), axis=1)
-                    res[f"{pn}_差額"] = res[pn] - res['現行料金']
+    res[pn] = calculate_bill_vectorized(res['使用量'], pdf)
+    res[f"{pn}_差額"] = res[pn] - res['現行料金']
                 st.session_state.simulation_result = res
         
         if st.session_state.simulation_result is not None:
@@ -383,7 +388,12 @@ if df_usage is not None and df_master_all is not None and selected_ids:
             st.markdown("**Current: 現行構成**")
             if ids_consistent:
                 m_rep = df_master_all[df_master_all['料金表番号'] == selected_ids[0]].sort_values('MAX').reset_index(drop=True)
-                df_target_usage['現行区画'] = df_target_usage['使用量'].apply(lambda x: get_tier_name(x, m_rep))
+                # 一括で区画判定するロジックに置換
+m_pdf = new_plans[sel_p].sort_values('MAX')
+bins_n = [0.0] + m_pdf['MAX'].tolist()
+if bins_n[0] == bins_n[1]: bins_n[0] = -0.001
+labels_n = m_pdf['区画名'].tolist()
+df_target_usage['新区画'] = pd.cut(df_target_usage['使用量'], bins=bins_n, labels=labels_n, right=True).astype(str)
                 agg_c = df_target_usage.groupby('現行区画').agg(件数=('使用量','count'), 使用量=('使用量','sum')).reset_index()
                 st.plotly_chart(px.pie(agg_c, values='件数', names='現行区画', hole=0.5, color_discrete_sequence=CHIC_PIE_COLORS), use_container_width=True)
                 st.dataframe(agg_c.style.format({"使用量":"{:,.1f}"}), hide_index=True, use_container_width=True)
