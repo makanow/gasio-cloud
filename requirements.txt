@@ -1,10 +1,11 @@
-streamlit==1.31.0
-pandas>=2.0.0
-plotly>=5.18.0
-numpy<2.0.0
+streamlit
+pandas
+plotly
+numpy
 openpyxl
 matplotlib
 jinja2
 pyxlsx
 xlsxwriter
 scikit-learn
+
