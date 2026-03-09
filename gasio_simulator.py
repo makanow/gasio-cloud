@@ -341,51 +341,51 @@ if df_usage is not None and df_master_all is not None and selected_ids:
             st.dataframe(pd.DataFrame(summ_list).style.format({"売上総額":"¥{:,.0f}","差額":"¥{:,.0f}","増減率":"{:.2f}%"}), hide_index=True, use_container_width=True)
 
     with tab_analysis:
-        st.markdown("##### 需要構成分析")
-        sel_p = st.selectbox("比較対象", list(new_plans.keys()), key="s_p_a")
-        fps = {tid: tuple(sorted(df_master_all[df_master_all['料金表番号']==tid]['MAX'].unique())) for tid in selected_ids}
-        for tid in fps: 
-            l = list(fps[tid]); l[-1] = 999999999.0; fps[tid] = tuple(l)
-        ids_consistent = (len(set(fps.values())) <= 1)
-        
-        g1, g2 = st.columns(2)
-                with g1:
-                    st.markdown("**Current: 現行構成**")
-                    if ids_consistent:
-                        m_rep = df_master_all[df_master_all['料金表番号'] == selected_ids[0]].sort_values('MAX').reset_index(drop=True)
-                        
-                        # --- 高速化対応：現行区画の判定 ---
-                        m_rep_records = m_rep.to_dict('records')
-                        def fast_get_tier_name(usage):
-                            for i, row in enumerate(m_rep_records):
-                                if row.get('MAX', 999999999.0) >= (usage - 1e-9):
-                                    return str(row.get('区画名', row.get('区画', i + 1)))
-                            return str(m_rep_records[-1].get('区画名', m_rep_records[-1].get('区画', len(m_rep_records))))
-                        
-                        df_target_usage['現行区画'] = [fast_get_tier_name(u) for u in df_target_usage['使用量']]
-                        # -----------------------------------
-        
-                        agg_c = df_target_usage.groupby('現行区画').agg(件数=('使用量','count'), 使用量=('使用量','sum')).reset_index()
-                        st.plotly_chart(px.pie(agg_c, values='件数', names='現行区画', hole=0.5, color_discrete_sequence=CHIC_PIE_COLORS), use_container_width=True)
-                        st.dataframe(agg_c.style.format({"使用量":"{:,.1f}"}), hide_index=True, use_container_width=True)
-                    else:
-                        st.info("⚠️ 異なる区画の料金表が混在")
-                        st.plotly_chart(px.histogram(df_target_usage, x="使用量", color="料金表番号", nbins=50, color_discrete_sequence=CHIC_PIE_COLORS), use_container_width=True)
-                with g2:
-                    st.markdown(f"**Proposal: {sel_p}構成**")
+            st.markdown("##### 需要構成分析")
+            sel_p = st.selectbox("比較対象", list(new_plans.keys()), key="s_p_a")
+            fps = {tid: tuple(sorted(df_master_all[df_master_all['料金表番号']==tid]['MAX'].unique())) for tid in selected_ids}
+            for tid in fps: 
+                l = list(fps[tid]); l[-1] = 999999999.0; fps[tid] = tuple(l)
+            ids_consistent = (len(set(fps.values())) <= 1)
+            
+            g1, g2 = st.columns(2)
+            with g1:
+                st.markdown("**Current: 現行構成**")
+                if ids_consistent:
+                    m_rep = df_master_all[df_master_all['料金表番号'] == selected_ids[0]].sort_values('MAX').reset_index(drop=True)
                     
-                    # --- 高速化対応：新区画の判定 ---
-                    m_pdf = new_plans[sel_p].sort_values('MAX')
-                    m_pdf_records = m_pdf.to_dict('records')
-                    def fast_get_new_tier(usage):
-                        for row in m_pdf_records:
-                            if row['MIN'] <= usage <= row['MAX']:
-                                return row['区画名']
-                        return np.nan
+                    # --- 高速化対応：現行区画の判定 ---
+                    m_rep_records = m_rep.to_dict('records')
+                    def fast_get_tier_name(usage):
+                        for i, row in enumerate(m_rep_records):
+                            if row.get('MAX', 999999999.0) >= (usage - 1e-9):
+                                return str(row.get('区画名', row.get('区画', i + 1)))
+                        return str(m_rep_records[-1].get('区画名', m_rep_records[-1].get('区画', len(m_rep_records))))
                     
-                    df_target_usage['新区画'] = [fast_get_new_tier(u) for u in df_target_usage['使用量']]
+                    df_target_usage['現行区画'] = [fast_get_tier_name(u) for u in df_target_usage['使用量']]
                     # -----------------------------------
-                    
-                    agg_n = df_target_usage.groupby('新区画').agg(件数=('使用量','count'), 使用量=('使用量','sum')).reset_index()
-                    st.plotly_chart(px.pie(agg_n, values='件数', names='新区画', hole=0.5, color_discrete_sequence=CHIC_PIE_COLORS), use_container_width=True)
-                    st.dataframe(agg_n.style.format({"件数":"{:,.0f}", "使用量":"{:,.1f}"}), hide_index=True, use_container_width=True)
+    
+                    agg_c = df_target_usage.groupby('現行区画').agg(件数=('使用量','count'), 使用量=('使用量','sum')).reset_index()
+                    st.plotly_chart(px.pie(agg_c, values='件数', names='現行区画', hole=0.5, color_discrete_sequence=CHIC_PIE_COLORS), use_container_width=True)
+                    st.dataframe(agg_c.style.format({"使用量":"{:,.1f}"}), hide_index=True, use_container_width=True)
+                else:
+                    st.info("⚠️ 異なる区画の料金表が混在")
+                    st.plotly_chart(px.histogram(df_target_usage, x="使用量", color="料金表番号", nbins=50, color_discrete_sequence=CHIC_PIE_COLORS), use_container_width=True)
+            with g2:
+                st.markdown(f"**Proposal: {sel_p}構成**")
+                
+                # --- 高速化対応：新区画の判定 ---
+                m_pdf = new_plans[sel_p].sort_values('MAX')
+                m_pdf_records = m_pdf.to_dict('records')
+                def fast_get_new_tier(usage):
+                    for row in m_pdf_records:
+                        if row['MIN'] <= usage <= row['MAX']:
+                            return row['区画名']
+                    return np.nan
+                
+                df_target_usage['新区画'] = [fast_get_new_tier(u) for u in df_target_usage['使用量']]
+                # -----------------------------------
+                
+                agg_n = df_target_usage.groupby('新区画').agg(件数=('使用量','count'), 使用量=('使用量','sum')).reset_index()
+                st.plotly_chart(px.pie(agg_n, values='件数', names='新区画', hole=0.5, color_discrete_sequence=CHIC_PIE_COLORS), use_container_width=True)
+                st.dataframe(agg_n.style.format({"件数":"{:,.0f}", "使用量":"{:,.1f}"}), hide_index=True, use_container_width=True)
