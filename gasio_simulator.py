@@ -309,7 +309,6 @@ if df_usage is not None and df_master_all is not None and selected_ids:
                                            column_config={"No": st.column_config.NumberColumn(disabled=True), "区画名": st.column_config.TextColumn("🖋️ 区画名"), "適用上限(m3)": st.column_config.NumberColumn("🖋️ 適用上限", format="%.1f"), "単位料金": st.column_config.NumberColumn("🖋️ 単位料金", format="%.4f")})
                     if not edited.equals(st.session_state.plan_data[i]):
                         st.session_state.plan_data[i] = edited
-                        st.rerun()
 
     with tab_sim:
         st.markdown("##### 収支影響シミュレーション")
