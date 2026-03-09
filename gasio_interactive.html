@@ -218,21 +218,20 @@
                     
                     let i = draggingIndex.value;
                     
-                    // ▼ 修正点：料金そのものを5円刻みにスナップさせる
                     if (i === 0) {
-                        // 基本料金を5円刻み
-                        baseA.value = Math.round(nY / 5) * 5;
+                        // ▼ 修正：A区画（基本料金）を【100円刻み】に強化
+                        baseA.value = Math.round(nY / 100) * 100;
                     } else if (i === points.value.length - 1) {
-                        // 最後のポイント：従量料金（単価）を5円刻み
+                        // ▼ 修正：従量料金（単価）のラッチも【10円刻み】に強化
                         let unitValue = (nY - points.value[i-1].y) / (80 - points.value[i-1].x);
-                        tiers.value[i-1].unit = Math.max(0, Math.round(unitValue / 5) * 5);
+                        tiers.value[i-1].unit = Math.max(0, Math.round(unitValue / 10) * 10);
                     } else {
-                        // 途中のポイント：X軸はそのまま、従量料金（単価）を5円刻み
                         nX = Math.max(points.value[i-1].x + 0.5, Math.min(nX, points.value[i+1].x - 0.5));
                         tiers.value[i-1].limit = parseFloat(snap(nX).toFixed(4));
                         
+                        // ▼ 修正：中間の従量料金（単価）も【10円刻み】に強化
                         let unitValue = (nY - points.value[i-1].y) / (nX - points.value[i-1].x);
-                        tiers.value[i-1].unit = Math.max(0, Math.round(unitValue / 5) * 5);
+                        tiers.value[i-1].unit = Math.max(0, Math.round(unitValue / 10) * 10);
                     }
                 };
 
