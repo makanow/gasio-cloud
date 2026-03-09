@@ -343,32 +343,41 @@ if df_usage is not None and df_master_all is not None and selected_ids:
     with tab_analysis:
         st.markdown("##### 需要構成分析")
         sel_p = st.selectbox("比較対象", list(new_plans.keys()), key="s_p_a")
+        
+        # --- 高速化：区画の一致判定を事前に整理 ---
         fps = {tid: tuple(sorted(df_master_all[df_master_all['料金表番号']==tid]['MAX'].unique())) for tid in selected_ids}
-        for tid in fps: 
-            l = list(fps[tid]); l[-1] = 999999999.0; fps[tid] = tuple(l)
         ids_consistent = (len(set(fps.values())) <= 1)
         
         g1, g2 = st.columns(2)
         with g1:
             st.markdown("**Current: 現行構成**")
             if ids_consistent:
-                m_rep = df_master_all[df_master_all['料金表番号'] == selected_ids[0]].sort_values('MAX').reset_index(drop=True)
-                df_target_usage['現行区画'] = df_target_usage['使用量'].apply(lambda x: get_tier_name(x, m_rep))
-                agg_c = df_target_usage.groupby('現行区画').agg(件数=('使用量','count'), 使用量=('使用量','sum')).reset_index()
+                # --- 高速化：applyを使わず pd.cut で一括判定 ---
+                m_rep = df_master_all[df_master_all['料金表番号'] == selected_ids[0]].sort_values('MAX')
+                bins_c = [0.0] + m_rep['MAX'].tolist()
+                # 0と0が並ぶ場合の微調整
+                if bins_c[0] == bins_c[1]: bins_c[0] = -0.001
+                labels_c = m_rep['区画名'].tolist()
+                
+                df_target_usage['現行区画'] = pd.cut(df_target_usage['使用量'], bins=bins_c, labels=labels_c, right=True)
+                
+                agg_c = df_target_usage.groupby('現行区画', observed=False).agg(件数=('使用量','count'), 使用量=('使用量','sum')).reset_index()
                 st.plotly_chart(px.pie(agg_c, values='件数', names='現行区画', hole=0.5, color_discrete_sequence=CHIC_PIE_COLORS), use_container_width=True)
                 st.dataframe(agg_c.style.format({"使用量":"{:,.1f}"}), hide_index=True, use_container_width=True)
             else:
-                st.info("⚠️ 異なる区画の料金表が混在")
+                st.info("⚠️ 異なる区画の料金表が混在しているため、全体分布を表示します")
                 st.plotly_chart(px.histogram(df_target_usage, x="使用量", color="料金表番号", nbins=50, color_discrete_sequence=CHIC_PIE_COLORS), use_container_width=True)
+
         with g2:
             st.markdown(f"**Proposal: {sel_p}構成**")
-            # 新区画判定の高速化
+            # --- 高速化：新プラン側も pd.cut で一括判定 ---
             m_pdf = new_plans[sel_p].sort_values('MAX')
             bins_n = [0.0] + m_pdf['MAX'].tolist()
             if bins_n[0] == bins_n[1]: bins_n[0] = -0.001
             labels_n = m_pdf['区画名'].tolist()
-            df_target_usage['新区画'] = pd.cut(df_target_usage['使用量'], bins=bins_n, labels=labels_n, right=True).astype(str)
             
-            agg_n = df_target_usage.groupby('新区画').agg(件数=('使用量','count'), 使用量=('使用量','sum')).reset_index()
+            df_target_usage['新区画'] = pd.cut(df_target_usage['使用量'], bins=bins_n, labels=labels_n, right=True)
+            
+            agg_n = df_target_usage.groupby('新区画', observed=False).agg(件数=('使用量','count'), 使用量=('使用量','sum')).reset_index()
             st.plotly_chart(px.pie(agg_n, values='件数', names='新区画', hole=0.5, color_discrete_sequence=CHIC_PIE_COLORS), use_container_width=True)
             st.dataframe(agg_n.style.format({"件数":"{:,.0f}", "使用量":"{:,.1f}"}), hide_index=True, use_container_width=True)
