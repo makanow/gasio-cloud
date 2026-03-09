@@ -155,6 +155,7 @@ def calculate_slide_rates(base_a, blocks_df):
     return base_fees
 
 def calculate_bill_single(usage, tariff_df):
+    """1件計算用（互換性維持のため残す）"""
     if tariff_df.empty: return 0
     df = tariff_df.copy()
     if '適用上限(m3)' in df.columns: df = df.rename(columns={'適用上限(m3)':'MAX'})
@@ -163,6 +164,25 @@ def calculate_bill_single(usage, tariff_df):
     row = target.iloc[0] if not target.empty else df.sort_values('MAX').iloc[-1]
     return int(row.get('基本料金', 0) + (usage * row['単位料金']))
 
+def calculate_bill_vectorized(usage_series, p_df):
+    """大量データ用（爆速計算用）"""
+    if p_df.empty: return pd.Series(0, index=usage_series.index)
+    # 料金表の準備
+    master = p_df.copy().sort_values('MAX')
+    bins = [0.0] + master['MAX'].tolist()
+    # 0件付近の計算エラー防止
+    if bins[0] == bins[1]: bins[0] = -0.001
+    
+    # どの区画に入るか一括判定
+    labels = range(len(master))
+    indices = pd.cut(usage_series, bins=bins, labels=labels, right=True)
+    indices = indices.fillna(0).astype(int)
+    
+    # 基本料金と単位料金を全行一気に適用
+    base_fees = master['基本料金'].values[indices]
+    unit_prices = master['単位料金'].values[indices]
+    
+    return base_fees + (usage_series.values * unit_prices)
 def get_tier_name(usage, tariff_df):
     if tariff_df.empty: return "Unknown"
     df = tariff_df.copy()
@@ -280,7 +300,7 @@ if df_usage is not None and df_master_all is not None and selected_ids:
         st.markdown("###### 📈 料金カーブ比較 (0〜50m3)")
         compare_df = pd.DataFrame({"使用量": list(range(0, 51, 2))})
         for p_name, p_df in new_plans.items():
-            compare_df[p_name] = compare_df["使用量"].apply(lambda v: calculate_bill_single(v, p_df))
+            compare_df[p_name] = calculate_bill_vectorized(compare_df["使用量"], p_df)
         
         fig = px.line(compare_df, x="使用量", y=list(new_plans.keys()), height=300, color_discrete_sequence=['#3498db', '#e74c3c', '#2ecc71'])
         fig.update_layout(yaxis_title="ガス料金(円)", legend_title="プラン", margin=dict(l=0, r=0, t=10, b=0))
