@@ -159,7 +159,7 @@ def calculate_bill_vectorized(usage_series, p_df):
     indices = indices.fillna(0).astype(int)
     base_fees = master['基本料金'].values[indices]
     unit_prices = master['単位料金'].values[indices]
-    return base_fees + (usage_series.values * unit_prices)
+    return np.floor(base_fees + (usage_series.values * unit_prices))
 
 def get_tier_name(usage, tariff_df):
     if tariff_df.empty: return "Unknown"
