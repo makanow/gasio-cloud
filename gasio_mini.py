@@ -253,7 +253,7 @@ if df_usage is not None and df_master is not None:
         with g1:
             # 【変更】調定数 -> 件数
             fig1 = px.pie(agg_df, values='件数', names='Current_Tier', hole=0.5, 
-                          color_discrete_sequence=chic_colors, title="件数シェア")
+                          color_discrete_sequence=chic_colors, title="調定数シェア")
             st.plotly_chart(fig1, use_container_width=True)
         with g2:
             fig2 = px.pie(agg_df, values='総使用量', names='Current_Tier', hole=0.5, 
