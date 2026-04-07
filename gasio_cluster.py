@@ -133,7 +133,10 @@ try:
         df_u_proc = df_u.rename(columns={'使用量': '使用量_u', '料金表番号': '料金表番号_u'})
         df_m_proc = df_m_filtered.rename(columns={'料金プランID': '料金表番号_m'})
         merged = pd.merge(df_u_proc, df_m_proc, left_on='料金表番号_u', right_on='料金表番号_m', how='inner')
-        df_calc = merged[(merged['使用量_u'] >= merged['下限'].astype(float)) & (merged['使用量_u'] <= merged['上限'].astype(float))].copy()
+        df_calc = merged[
+            (merged['使用量_u'] >= merged['下限'].astype(float)) & 
+            (merged['使用量_u'] < merged['上限'].astype(float))  # ここを「以下」から「未満」に変える
+        ].copy()
         df_calc['当月金額'] = df_calc['基本料金'] + (df_calc['使用量_u'] * df_calc['従量単価'])
         base_fees = df_m_proc.sort_values(['料金表番号_m', '下限']).groupby('料金表番号_m').head(1)[['料金表番号_m', '基本料金']]
         base_fees.columns = ['料金表番号_m', 'マスタ基本料金']
