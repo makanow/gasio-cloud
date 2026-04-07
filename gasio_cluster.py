@@ -82,19 +82,23 @@ with st.sidebar:
     filter_placeholder = st.container()
     export_placeholder = st.empty()
 
-# --- 5. データロードの確定 ---
+# --- 5. データロードの確定（防弾仕様） ---
 if file_master and file_usage:
     df_m = safe_read_csv(file_master)
     df_u = safe_read_csv(file_usage)
     
-    # 【ここを修正！】「使用量」を強制的に数値型に変換
-    # 文字列が混じっていても、エラー値をNaN（空）にして落とす
-    df_u['使用量'] = pd.to_numeric(df_u['使用量'].astype(str).str.replace(',', ''), errors='coerce')
-    df_u = df_u.dropna(subset=['使用量']) 
-    
-    # 念のため「料金表番号」も数値にしておく
-    df_u['料金表番号'] = pd.to_numeric(df_u['料金表番号'], errors='coerce')
-    df_u = df_u.dropna(subset=['料金表番号'])
+    # 【最重要】マスタデータの「下限」「上限」「基本料金」「従量単価」からカンマを除去して数値化
+    for col in ['下限', '上限', '基本料金', '従量単価']:
+        if col in df_m.columns:
+            df_m[col] = pd.to_numeric(df_m[col].astype(str).str.replace(',', ''), errors='coerce')
+            
+    # 【最重要】実績データの「使用量」からもカンマを除去して数値化
+    if '使用量' in df_u.columns:
+        df_u['使用量'] = pd.to_numeric(df_u['使用量'].astype(str).str.replace(',', ''), errors='coerce')
+
+    # 欠損値（変換できなかったゴミデータ）を排除
+    df_m = df_m.dropna(subset=['下限', '上限'])
+    df_u = df_u.dropna(subset=['使用量'])
 else:
     df_m, df_u = get_demo_data()
 # --- 6. サイドバー：動的要素の配置（ロード後の数値を利用） ---
