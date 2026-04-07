@@ -86,9 +86,17 @@ with st.sidebar:
 if file_master and file_usage:
     df_m = safe_read_csv(file_master)
     df_u = safe_read_csv(file_usage)
+    
+    # 【ここを修正！】「使用量」を強制的に数値型に変換
+    # 文字列が混じっていても、エラー値をNaN（空）にして落とす
+    df_u['使用量'] = pd.to_numeric(df_u['使用量'].astype(str).str.replace(',', ''), errors='coerce')
+    df_u = df_u.dropna(subset=['使用量']) 
+    
+    # 念のため「料金表番号」も数値にしておく
+    df_u['料金表番号'] = pd.to_numeric(df_u['料金表番号'], errors='coerce')
+    df_u = df_u.dropna(subset=['料金表番号'])
 else:
     df_m, df_u = get_demo_data()
-
 # --- 6. サイドバー：動的要素の配置（ロード後の数値を利用） ---
 all_plans_raw = sorted(df_m['料金プラン名'].unique())
 n_plans_raw = len(all_plans_raw)
